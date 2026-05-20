@@ -7,9 +7,10 @@ import { VariantService } from './variant.service';
 import { CategoryModule } from '../category/category.module';
 import { AuthModule } from '../../auth/auth.module';
 import { MediaModule } from '../../media/media.module';
+import { TaxModule } from '../../tax/tax.module';
 
 @Module({
-  imports: [CategoryModule, AuthModule, MediaModule],
+  imports: [CategoryModule, AuthModule, MediaModule, TaxModule],
   controllers: [
     VariantController,
     BackofficeVariantController,

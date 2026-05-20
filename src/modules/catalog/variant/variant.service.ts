@@ -14,6 +14,7 @@ import {
   VariantSort,
 } from './list-variants.query';
 import { CloudinaryService } from '../../media/cloudinary.service';
+import { TaxService } from '../../tax/tax.service';
 
 type UploadedImageFile = {
   buffer: Buffer;
@@ -66,6 +67,7 @@ export class VariantService {
     private readonly prisma: PrismaService,
     private readonly categoryService: CategoryService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly taxService: TaxService,
   ) {}
 
   findAllBackoffice() {
@@ -191,13 +193,9 @@ export class VariantService {
       take,
     });
 
-    return variants.map((variant) => ({
-      ...variant,
-      effectiveImageUrls:
-        variant.imageUrls.length > 0
-          ? variant.imageUrls
-          : variant.product.imageUrls,
-    }));
+    return Promise.all(
+      variants.map((variant) => this.withPublicPricing(variant)),
+    );
   }
 
   async search(query: ListVariantsQuery) {
@@ -221,13 +219,9 @@ export class VariantService {
     ]);
 
     return {
-      items: items.map((variant) => ({
-        ...variant,
-        effectiveImageUrls:
-          variant.imageUrls.length > 0
-            ? variant.imageUrls
-            : variant.product.imageUrls,
-      })),
+      items: await Promise.all(
+        items.map((variant) => this.withPublicPricing(variant)),
+      ),
       total,
       page: pagination.page,
       limit: pagination.limit,
@@ -235,46 +229,38 @@ export class VariantService {
     };
   }
 
-  findBySlug(slug: string) {
-    return this.prisma.productVariant
-      .findFirst({
-        where: {
-          slug,
+  async findBySlug(slug: string) {
+    const variant = await this.prisma.productVariant.findFirst({
+      where: {
+        slug,
+        active: true,
+        product: {
           active: true,
-          product: {
-            active: true,
-            status: 'PUBLISHED',
-          },
+          status: 'PUBLISHED',
         },
-        include: {
-          category: true,
-          brand: true,
-          product: true,
-          attributeValues: {
-            include: {
-              productAttributeDefinition: true,
-            },
-            orderBy: {
-              productAttributeDefinition: {
-                sortOrder: 'asc',
-              },
+      },
+      include: {
+        category: true,
+        brand: true,
+        product: true,
+        attributeValues: {
+          include: {
+            productAttributeDefinition: true,
+          },
+          orderBy: {
+            productAttributeDefinition: {
+              sortOrder: 'asc',
             },
           },
         },
-      })
-      .then((variant) => {
-        if (!variant) {
-          return null;
-        }
+      },
+    });
 
-        return {
-          ...variant,
-          effectiveImageUrls:
-            variant.imageUrls.length > 0
-              ? variant.imageUrls
-              : variant.product.imageUrls,
-        };
-      });
+    if (!variant) {
+      return null;
+    }
+
+    return this.withPublicPricing(variant);
   }
 
   async update(id: string, data: UpdateVariantDto) {
@@ -819,6 +805,61 @@ export class VariantService {
       attributeColumns: expectedAttributeColumns,
       rows: validRows,
     };
+  }
+
+  private async withPublicPricing<
+    TVariant extends Prisma.ProductVariantGetPayload<{
+      include: { product: true };
+    }>,
+  >(variant: TVariant) {
+    const effectivePrice = this.resolveEffectivePrice(variant);
+    const tax = await this.taxService.resolveEffectiveTax({
+      categoryId: variant.categoryId,
+      productId: variant.productId,
+      variantId: variant.id,
+    });
+    const taxAmount = effectivePrice
+      .times(tax.taxPercent)
+      .div(100)
+      .toDecimalPlaces(2);
+
+    return {
+      ...variant,
+      effectiveImageUrls:
+        variant.imageUrls.length > 0
+          ? variant.imageUrls
+          : variant.product.imageUrls,
+      tax: {
+        source: tax.scope,
+        targetId: tax.targetId,
+        percent: tax.taxPercent.toString(),
+      },
+      pricing: {
+        effectivePrice: effectivePrice.toString(),
+        taxAmount: taxAmount.toString(),
+        totalWithTax: effectivePrice.plus(taxAmount).toString(),
+      },
+    };
+  }
+
+  private resolveEffectivePrice(
+    variant: Pick<
+      Prisma.ProductVariantGetPayload<object>,
+      'price' | 'salePrice' | 'discountPercent'
+    >,
+  ) {
+    if (variant.salePrice) {
+      return variant.salePrice;
+    }
+
+    if (variant.discountPercent && !variant.discountPercent.isZero()) {
+      return variant.price
+        .times(new Prisma.Decimal(100).minus(variant.discountPercent))
+        .div(100)
+        .toDecimalPlaces(2);
+    }
+
+    return variant.price;
   }
 
   private parseCsvContent(fileBuffer: Buffer) {

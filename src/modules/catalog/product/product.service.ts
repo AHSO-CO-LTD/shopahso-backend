@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateProductDto } from './create-product.dto';
 import { UpdateProductDto } from './update-product.dto';
 import { CloudinaryService } from '../../media/cloudinary.service';
+import { TaxService } from '../../tax/tax.service';
 
 type UploadedImageFile = {
   buffer: Buffer;
@@ -14,99 +16,81 @@ export class ProductService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly taxService: TaxService,
   ) {}
 
-  findFeatured() {
-    return this.prisma.product
-      .findMany({
-        where: { active: true, status: 'PUBLISHED' },
-        orderBy: [{ variants: { _count: 'desc' } }, { createdAt: 'desc' }],
-        take: 10,
-        include: {
-          category: true,
-          brand: true,
-          variants: {
-            where: { active: true },
-            orderBy: [
-              { score: 'desc' },
-              { orderCount: 'desc' },
-              { viewCount: 'desc' },
-              { name: 'asc' },
-            ],
-            take: 1,
-          },
+  async findFeatured() {
+    const products = await this.prisma.product.findMany({
+      where: { active: true, status: 'PUBLISHED' },
+      orderBy: [{ variants: { _count: 'desc' } }, { createdAt: 'desc' }],
+      take: 10,
+      include: {
+        category: true,
+        brand: true,
+        variants: {
+          where: { active: true },
+          orderBy: [
+            { score: 'desc' },
+            { orderCount: 'desc' },
+            { viewCount: 'desc' },
+            { name: 'asc' },
+          ],
+          take: 1,
         },
-      })
-      .then((products) => {
-        const normalized = products.map((product) => ({
-          ...product,
-          featuredScore: product.variants[0]?.score ?? 0,
-          effectiveImageUrls:
-            product.imageUrls.length > 0
-              ? product.imageUrls
-              : (product.variants[0]?.imageUrls ?? []),
-        }));
+      },
+    });
 
-        if (normalized.length > 0) {
-          return normalized;
-        }
+    const normalized = await Promise.all(
+      products.map((product) => this.withPublicProductPricing(product, true)),
+    );
 
-        return this.findNewest();
-      });
+    if (normalized.length > 0) {
+      return normalized;
+    }
+
+    return this.findNewest();
   }
 
-  findNewest() {
-    return this.prisma.product
-      .findMany({
-        where: { active: true, status: 'PUBLISHED' },
-        orderBy: [{ createdAt: 'desc' }],
-        take: 10,
-        include: {
-          category: true,
-          brand: true,
-          variants: {
-            where: { active: true },
-            orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
-            take: 1,
-          },
+  async findNewest() {
+    const products = await this.prisma.product.findMany({
+      where: { active: true, status: 'PUBLISHED' },
+      orderBy: [{ createdAt: 'desc' }],
+      take: 10,
+      include: {
+        category: true,
+        brand: true,
+        variants: {
+          where: { active: true },
+          orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
+          take: 1,
         },
-      })
-      .then((products) => {
-        const normalized = products.map((product) => ({
-          ...product,
-          effectiveImageUrls:
-            product.imageUrls.length > 0
-              ? product.imageUrls
-              : (product.variants[0]?.imageUrls ?? []),
-        }));
+      },
+    });
 
-        if (normalized.length > 0) {
-          return normalized;
-        }
+    const normalized = await Promise.all(
+      products.map((product) => this.withPublicProductPricing(product)),
+    );
 
-        return this.prisma.product
-          .findMany({
-            orderBy: [{ createdAt: 'desc' }],
-            take: 10,
-            include: {
-              category: true,
-              brand: true,
-              variants: {
-                orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
-                take: 1,
-              },
-            },
-          })
-          .then((fallbackProducts) =>
-            fallbackProducts.map((product) => ({
-              ...product,
-              effectiveImageUrls:
-                product.imageUrls.length > 0
-                  ? product.imageUrls
-                  : (product.variants[0]?.imageUrls ?? []),
-            })),
-          );
-      });
+    if (normalized.length > 0) {
+      return normalized;
+    }
+
+    const fallbackProducts = await this.prisma.product.findMany({
+      orderBy: [{ createdAt: 'desc' }],
+      take: 10,
+      include: {
+        category: true,
+        brand: true,
+        variants: {
+          orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
+          take: 1,
+        },
+      },
+    });
+
+    return Promise.all(
+      fallbackProducts.map((product) => this.withPublicProductPricing(product)),
+    );
   }
 
   findAllBackoffice() {
@@ -225,11 +209,11 @@ export class ProductService {
 
     return {
       ...product,
-      variants: product.variants.map((variant) => ({
-        ...variant,
-        effectiveImageUrls:
-          variant.imageUrls.length > 0 ? variant.imageUrls : product.imageUrls,
-      })),
+      variants: await Promise.all(
+        product.variants.map((variant) =>
+          this.withPublicVariantPricing(variant, product.imageUrls),
+        ),
+      ),
     };
   }
 
@@ -385,6 +369,81 @@ export class ProductService {
         imagePublicIds: nextPublicIds,
       },
     });
+  }
+
+  private async withPublicProductPricing<
+    TProduct extends Prisma.ProductGetPayload<{
+      include: { variants: true };
+    }>,
+  >(product: TProduct, includeFeaturedScore = false) {
+    const variants = await Promise.all(
+      product.variants.map((variant) =>
+        this.withPublicVariantPricing(variant, product.imageUrls),
+      ),
+    );
+
+    return {
+      ...product,
+      ...(includeFeaturedScore
+        ? { featuredScore: product.variants[0]?.score ?? 0 }
+        : {}),
+      variants,
+      effectiveImageUrls:
+        product.imageUrls.length > 0
+          ? product.imageUrls
+          : (product.variants[0]?.imageUrls ?? []),
+    };
+  }
+
+  private async withPublicVariantPricing<
+    TVariant extends Prisma.ProductVariantGetPayload<object>,
+  >(variant: TVariant, productImageUrls: string[]) {
+    const effectivePrice = this.resolveEffectivePrice(variant);
+    const tax = await this.taxService.resolveEffectiveTax({
+      categoryId: variant.categoryId,
+      productId: variant.productId,
+      variantId: variant.id,
+    });
+    const taxAmount = effectivePrice
+      .times(tax.taxPercent)
+      .div(100)
+      .toDecimalPlaces(2);
+
+    return {
+      ...variant,
+      effectiveImageUrls:
+        variant.imageUrls.length > 0 ? variant.imageUrls : productImageUrls,
+      tax: {
+        source: tax.scope,
+        targetId: tax.targetId,
+        percent: tax.taxPercent.toString(),
+      },
+      pricing: {
+        effectivePrice: effectivePrice.toString(),
+        taxAmount: taxAmount.toString(),
+        totalWithTax: effectivePrice.plus(taxAmount).toString(),
+      },
+    };
+  }
+
+  private resolveEffectivePrice(
+    variant: Pick<
+      Prisma.ProductVariantGetPayload<object>,
+      'price' | 'salePrice' | 'discountPercent'
+    >,
+  ) {
+    if (variant.salePrice) {
+      return variant.salePrice;
+    }
+
+    if (variant.discountPercent && !variant.discountPercent.isZero()) {
+      return variant.price
+        .times(new Prisma.Decimal(100).minus(variant.discountPercent))
+        .div(100)
+        .toDecimalPlaces(2);
+    }
+
+    return variant.price;
   }
 
   private async ensureCategoryExists(id: string) {

@@ -24,6 +24,51 @@ enum ProductStatus {
   PUBLISHED
 }
 
+enum TaxScope {
+  GLOBAL
+  CATEGORY
+  PRODUCT
+  VARIANT
+}
+
+enum PaymentProvider {
+  VIETQR
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAYMENT_REVIEW
+  CONFIRMED
+  PROCESSING
+  READY_TO_SHIP
+  SHIPPING
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+enum PaymentStatus {
+  WAITING_CUSTOMER_TRANSFER
+  CUSTOMER_CONFIRMED
+  PAID
+  REJECTED
+  REFUNDED
+}
+
+enum FulfillmentStatus {
+  NOT_STARTED
+  PROCESSING
+  READY_TO_SHIP
+  SHIPPING
+  DELIVERED
+  FAILED
+  RETURNED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER_QR
+}
+
 model Category {
   id          String                      @id @default(uuid())
   parentId    String?                     @map("parent_id")
@@ -46,39 +91,41 @@ model Category {
 }
 
 model Brand {
-  id        String           @id @default(uuid())
-  name      String
-  slug      String           @unique
-  logoUrl   String?          @map("logo_url")
-  logoPublicId String?       @map("logo_public_id")
-  active    Boolean          @default(true)
-  createdAt DateTime         @default(now()) @map("created_at")
-  updatedAt DateTime         @updatedAt @map("updated_at")
-  products  Product[]
-  variants  ProductVariant[]
+  id           String           @id @default(uuid())
+  name         String
+  slug         String           @unique
+  logoUrl      String?          @map("logo_url")
+  logoPublicId String?          @map("logo_public_id")
+  active       Boolean          @default(true)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  products     Product[]
+  variants     ProductVariant[]
 
   @@index([active], map: "idx_brands_active")
   @@map("brands")
 }
 
 model Product {
-  id           String                       @id @default(uuid())
-  categoryId   String                       @map("category_id")
-  brandId      String?                      @map("brand_id")
-  name         String
-  slug         String                       @unique
-  description  String?
-  datasheetUrl String?                      @map("datasheet_url")
-  imageUrls    String[]                     @default([]) @map("image_urls")
-  imagePublicIds String[]                   @default([]) @map("image_public_ids")
-  status       ProductStatus                @default(DRAFT)
-  active       Boolean                      @default(true)
-  createdAt    DateTime                     @default(now()) @map("created_at")
-  updatedAt    DateTime                     @updatedAt @map("updated_at")
-  category     Category                     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  brand        Brand?                       @relation(fields: [brandId], references: [id], onDelete: SetNull)
-  variants     ProductVariant[]
-  attributes   ProductAttributeDefinition[]
+  id             String                       @id @default(uuid())
+  categoryId     String                       @map("category_id")
+  brandId        String?                      @map("brand_id")
+  name           String
+  slug           String                       @unique
+  description    String?
+  datasheetUrl   String?                      @map("datasheet_url")
+  imageUrls      String[]                     @default([]) @map("image_urls")
+  imagePublicIds String[]                     @default([]) @map("image_public_ids")
+  status         ProductStatus                @default(DRAFT)
+  active         Boolean                      @default(true)
+  createdAt      DateTime                     @default(now()) @map("created_at")
+  updatedAt      DateTime                     @updatedAt @map("updated_at")
+  category       Category                     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand          Brand?                       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  variants       ProductVariant[]
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+  attributes     ProductAttributeDefinition[]
 
   @@index([categoryId, active], map: "idx_products_category_active")
   @@index([brandId, active], map: "idx_products_brand_active")
@@ -115,6 +162,8 @@ model ProductVariant {
   category               Category                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   brand                  Brand?                  @relation(fields: [brandId], references: [id], onDelete: SetNull)
   attributeValues        VariantAttributeValue[]
+  cartItems              CartItem[]
+  orderItems             OrderItem[]
 
   @@index([active, score(sort: Desc)], map: "idx_variants_active_score")
   @@index([categoryId, score(sort: Desc)], map: "idx_variants_category_score")
@@ -192,19 +241,217 @@ model VariantAttributeValue {
 }
 
 model User {
-  id               String    @id @default(uuid())
-  fullName         String?   @map("full_name")
-  dateOfBirth      DateTime? @map("date_of_birth")
-  email            String    @unique
-  phoneNumber      String?   @unique @map("phone_number")
-  passwordHash     String    @map("password_hash")
-  role             AppRole   @default(USER)
-  active           Boolean   @default(true)
-  refreshTokenHash String?   @map("refresh_token_hash")
-  lastLoginAt      DateTime? @map("last_login_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id               String        @id @default(uuid())
+  fullName         String?       @map("full_name")
+  dateOfBirth      DateTime?     @map("date_of_birth")
+  email            String        @unique
+  phoneNumber      String?       @unique @map("phone_number")
+  passwordHash     String        @map("password_hash")
+  role             AppRole       @default(USER)
+  active           Boolean       @default(true)
+  refreshTokenHash String?       @map("refresh_token_hash")
+  lastLoginAt      DateTime?     @map("last_login_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  addresses        UserAddress[]
+  carts            Cart[]
+  orders           Order[]       @relation("CustomerOrders")
+  verifiedPayments Order[]       @relation("PaymentVerifiedByStaff")
 
   @@index([role, active], map: "idx_users_role_active")
   @@map("users")
+}
+
+model UserAddress {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  label          String
+  name           String
+  phoneNumber    String?  @map("phone_number")
+  provinceCode   String   @map("province_code")
+  provinceName   String   @map("province_name")
+  wardCode       String   @map("ward_code")
+  wardName       String   @map("ward_name")
+  streetAddress  String   @map("street_address")
+  note           String?
+  status         Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shippingOrders Order[]  @relation("OrderShippingAddress")
+  invoiceOrders  Order[]  @relation("OrderInvoiceAddress")
+
+  @@index([userId, status], map: "idx_user_addresses_user_id_status")
+  @@index([provinceCode, wardCode], map: "idx_user_addresses_province_ward")
+  @@map("user_addresses")
+}
+
+model Cart {
+  id         String     @id @default(uuid())
+  userId     String?    @map("user_id")
+  guestToken String?    @unique @map("guest_token")
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  user       User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items      CartItem[]
+
+  @@unique([userId], map: "uq_carts_user_id")
+  @@index([userId], map: "idx_carts_user_id")
+  @@map("carts")
+}
+
+model CartItem {
+  id                     String         @id @default(uuid())
+  cartId                 String         @map("cart_id")
+  productId              String         @map("product_id")
+  variantId              String         @map("variant_id")
+  quantity               Int
+  productNameSnapshot    String         @map("product_name_snapshot")
+  variantNameSnapshot    String         @map("variant_name_snapshot")
+  priceSnapshot          Decimal        @map("price_snapshot") @db.Decimal(12, 2)
+  salePriceSnapshot      Decimal?       @map("sale_price_snapshot") @db.Decimal(12, 2)
+  effectivePriceSnapshot Decimal        @map("effective_price_snapshot") @db.Decimal(12, 2)
+  imageUrlSnapshot       String?        @map("image_url_snapshot")
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+  cart                   Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product                Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant                ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([cartId, variantId], map: "uq_cart_items_cart_id_variant_id")
+  @@index([cartId], map: "idx_cart_items_cart_id")
+  @@index([productId], map: "idx_cart_items_product_id")
+  @@index([variantId], map: "idx_cart_items_variant_id")
+  @@map("cart_items")
+}
+
+model Order {
+  id                       String            @id @default(uuid())
+  orderCode                String            @unique @map("order_code")
+  userId                   String?           @map("user_id")
+  guestToken               String?           @map("guest_token")
+  status                   OrderStatus       @default(PENDING_PAYMENT)
+  paymentStatus            PaymentStatus     @default(WAITING_CUSTOMER_TRANSFER) @map("payment_status")
+  fulfillmentStatus        FulfillmentStatus @default(NOT_STARTED) @map("fulfillment_status")
+  customerName             String?           @map("customer_name")
+  customerEmail            String?           @map("customer_email")
+  customerPhone            String?           @map("customer_phone")
+  shippingAddressId        String?           @map("shipping_address_id")
+  shippingName             String            @map("shipping_name")
+  shippingPhone            String?           @map("shipping_phone")
+  shippingProvinceCode     String            @map("shipping_province_code")
+  shippingProvinceName     String            @map("shipping_province_name")
+  shippingWardCode         String            @map("shipping_ward_code")
+  shippingWardName         String            @map("shipping_ward_name")
+  shippingStreetAddress    String            @map("shipping_street_address")
+  shippingNote             String?           @map("shipping_note")
+  invoiceRequested         Boolean           @default(false) @map("invoice_requested")
+  invoiceAddressId         String?           @map("invoice_address_id")
+  invoiceName              String?           @map("invoice_name")
+  invoicePhone             String?           @map("invoice_phone")
+  invoiceCompanyName       String?           @map("invoice_company_name")
+  invoiceTaxCode           String?           @map("invoice_tax_code")
+  invoiceEmail             String?           @map("invoice_email")
+  invoiceProvinceCode      String?           @map("invoice_province_code")
+  invoiceProvinceName      String?           @map("invoice_province_name")
+  invoiceWardCode          String?           @map("invoice_ward_code")
+  invoiceWardName          String?           @map("invoice_ward_name")
+  invoiceStreetAddress     String?           @map("invoice_street_address")
+  voucherCode              String?           @map("voucher_code")
+  subtotalAmount           Decimal           @map("subtotal_amount") @db.Decimal(12, 2)
+  taxAmount                Decimal           @map("tax_amount") @db.Decimal(12, 2)
+  shippingFee              Decimal           @default(0) @map("shipping_fee") @db.Decimal(12, 2)
+  discountAmount           Decimal           @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  grandTotalAmount         Decimal           @map("grand_total_amount") @db.Decimal(12, 2)
+  paymentMethod            PaymentMethod     @default(BANK_TRANSFER_QR) @map("payment_method")
+  paymentProvider          PaymentProvider?  @map("payment_provider")
+  paymentQrUrl             String?           @map("payment_qr_url")
+  paymentBankCode          String?           @map("payment_bank_code")
+  paymentBankName          String?           @map("payment_bank_name")
+  paymentBankAccountNumber String?           @map("payment_bank_account_number")
+  paymentBankAccountName   String?           @map("payment_bank_account_name")
+  paymentTransferContent   String?           @map("payment_transfer_content")
+  paymentConfirmedByUserAt DateTime?         @map("payment_confirmed_by_user_at")
+  paymentVerifiedAt        DateTime?         @map("payment_verified_at")
+  paymentVerifiedByStaffId String?           @map("payment_verified_by_staff_id")
+  paymentRejectReason      String?           @map("payment_reject_reason")
+  customerNote             String?           @map("customer_note")
+  staffNote                String?           @map("staff_note")
+  cancelledAt              DateTime?         @map("cancelled_at")
+  completedAt              DateTime?         @map("completed_at")
+  createdAt                DateTime          @default(now()) @map("created_at")
+  updatedAt                DateTime          @updatedAt @map("updated_at")
+  user                     User?             @relation("CustomerOrders", fields: [userId], references: [id], onDelete: Restrict)
+  shippingAddress          UserAddress?      @relation("OrderShippingAddress", fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  invoiceAddress           UserAddress?      @relation("OrderInvoiceAddress", fields: [invoiceAddressId], references: [id], onDelete: SetNull)
+  paymentVerifiedByStaff   User?             @relation("PaymentVerifiedByStaff", fields: [paymentVerifiedByStaffId], references: [id], onDelete: SetNull)
+  items                    OrderItem[]
+
+  @@index([userId, createdAt], map: "idx_orders_user_created_at")
+  @@index([guestToken, createdAt], map: "idx_orders_guest_token_created_at")
+  @@index([orderCode, customerEmail], map: "idx_orders_order_code_customer_email")
+  @@index([status, createdAt], map: "idx_orders_status_created_at")
+  @@index([paymentStatus, createdAt], map: "idx_orders_payment_status_created_at")
+  @@map("orders")
+}
+
+model OrderItem {
+  id                     String         @id @default(uuid())
+  orderId                String         @map("order_id")
+  productId              String         @map("product_id")
+  variantId              String         @map("variant_id")
+  productNameSnapshot    String         @map("product_name_snapshot")
+  variantNameSnapshot    String         @map("variant_name_snapshot")
+  skuSnapshot            String         @map("sku_snapshot")
+  imageUrlSnapshot       String?        @map("image_url_snapshot")
+  unitSnapshot           String?        @map("unit_snapshot")
+  quantity               Int
+  priceSnapshot          Decimal        @map("price_snapshot") @db.Decimal(12, 2)
+  salePriceSnapshot      Decimal?       @map("sale_price_snapshot") @db.Decimal(12, 2)
+  effectivePriceSnapshot Decimal        @map("effective_price_snapshot") @db.Decimal(12, 2)
+  taxPercentSnapshot     Decimal        @map("tax_percent_snapshot") @db.Decimal(5, 2)
+  taxAmount              Decimal        @map("tax_amount") @db.Decimal(12, 2)
+  subtotalAmount         Decimal        @map("subtotal_amount") @db.Decimal(12, 2)
+  totalAmount            Decimal        @map("total_amount") @db.Decimal(12, 2)
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+  order                  Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product                Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant                ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@index([orderId], map: "idx_order_items_order_id")
+  @@index([productId], map: "idx_order_items_product_id")
+  @@index([variantId], map: "idx_order_items_variant_id")
+  @@map("order_items")
+}
+
+model TaxSetting {
+  id         String   @id @default(uuid())
+  scope      TaxScope
+  targetId   String?  @map("target_id")
+  targetKey  String   @map("target_key")
+  taxPercent Decimal  @map("tax_percent") @db.Decimal(5, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([scope, targetKey], map: "uq_tax_settings_scope_target_key")
+  @@index([scope], map: "idx_tax_settings_scope")
+  @@map("tax_settings")
+}
+
+model PaymentSetting {
+  id                      String          @id @default(uuid())
+  provider                PaymentProvider @default(VIETQR)
+  bankCode                String          @map("bank_code")
+  bankName                String          @map("bank_name")
+  accountNumber           String          @map("account_number")
+  accountName             String          @map("account_name")
+  qrTemplate              String          @default("compact2") @map("qr_template")
+  transferContentTemplate String          @default("AHSO {orderCode}") @map("transfer_content_template")
+  active                  Boolean         @default(false)
+  createdAt               DateTime        @default(now()) @map("created_at")
+  updatedAt               DateTime        @updatedAt @map("updated_at")
+
+  @@index([active], map: "idx_payment_settings_active")
+  @@map("payment_settings")
 }

@@ -6,9 +6,24 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { SlugModule } from './modules/slug/slug.module';
+import { CartModule } from './modules/cart/cart.module';
+import { TaxModule } from './modules/tax/tax.module';
+import { AddressModule } from './modules/address/address.module';
+import { PaymentModule } from './modules/payment/payment.module';
+import { OrdersModule } from './modules/orders/orders.module';
 
 @Module({
-  imports: [CatalogModule, AuthModule, UsersModule, SlugModule],
+  imports: [
+    CatalogModule,
+    AuthModule,
+    UsersModule,
+    SlugModule,
+    CartModule,
+    TaxModule,
+    AddressModule,
+    PaymentModule,
+    OrdersModule,
+  ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
 })
