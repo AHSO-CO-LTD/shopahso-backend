@@ -455,3 +455,17 @@ model PaymentSetting {
   @@index([active], map: "idx_payment_settings_active")
   @@map("payment_settings")
 }
+
+model MailSetting {
+  id                         String   @id @default(uuid())
+  adminOrderRecipients       String[] @default([]) @map("admin_order_recipients")
+  notifyRegistrationCustomer Boolean  @default(true) @map("notify_registration_customer")
+  notifyOrderCreatedCustomer Boolean  @default(true) @map("notify_order_created_customer")
+  notifyOrderStatusCustomer  Boolean  @default(true) @map("notify_order_status_customer")
+  notifyOrderCreatedAdmin    Boolean  @default(true) @map("notify_order_created_admin")
+  notifyOrderCompletedAdmin  Boolean  @default(true) @map("notify_order_completed_admin")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@map("mail_settings")
+}

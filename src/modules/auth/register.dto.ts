@@ -4,11 +4,11 @@ import {
   IsDate,
   IsEmail,
   IsOptional,
-  IsPhoneNumber,
   IsString,
   IsStrongPassword,
   MaxLength,
 } from 'class-validator';
+import { IsVietnamPhoneNumber } from '../../common/vietnam-phone';
 
 export class RegisterDto {
   @ApiProperty()
@@ -29,7 +29,7 @@ export class RegisterDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsPhoneNumber('VN')
+  @IsVietnamPhoneNumber()
   phoneNumber?: string;
 
   @ApiProperty()

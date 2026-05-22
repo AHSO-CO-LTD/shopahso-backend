@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Patch,
   Post,
   UnauthorizedException,
   UseGuards,
@@ -13,6 +14,7 @@ import { LoginDto } from './login.dto';
 import { RefreshTokenDto } from './refresh-token.dto';
 import { BootstrapAdminDto } from './bootstrap-admin.dto';
 import { RegisterDto } from './register.dto';
+import { UpdateProfileDto } from './update-profile.dto';
 import { AccessTokenGuard } from './access-token.guard';
 import { CurrentUser } from './current-user.decorator';
 import type { JwtUserPayload } from './auth.types';
@@ -78,5 +80,19 @@ export class AuthController {
     }
 
     return this.authService.getProfile(user.sub);
+  }
+
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @Patch('me')
+  updateMe(
+    @CurrentUser() user: JwtUserPayload | undefined,
+    @Body() body: UpdateProfileDto,
+  ) {
+    if (!user) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+
+    return this.authService.updateProfile(user.sub, body);
   }
 }

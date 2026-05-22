@@ -8,10 +8,10 @@ import {
   IsEnum,
   IsNotEmpty,
   IsOptional,
-  IsPhoneNumber,
   IsString,
   MaxLength,
 } from 'class-validator';
+import { IsVietnamPhoneNumber } from '../../common/vietnam-phone';
 
 export class CreateUserDto {
   @ApiPropertyOptional()
@@ -34,7 +34,7 @@ export class CreateUserDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsPhoneNumber('VN')
+  @IsVietnamPhoneNumber()
   phoneNumber?: string;
 
   @ApiProperty()

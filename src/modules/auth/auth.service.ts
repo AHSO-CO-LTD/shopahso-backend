@@ -1,15 +1,21 @@
 import {
+  BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { AppRole } from '@prisma/client';
+import { AppRole, Prisma } from '@prisma/client';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { timingSafeEqual } from 'crypto';
+import { normalizeVietnamPhoneNumber } from '../../common/vietnam-phone';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import { AuthConfigService } from './auth-config.service';
 import { JwtUserPayload } from './auth.types';
+import { UpdateProfileDto } from './update-profile.dto';
 
 type RegisterUserInput = {
   fullName: string;
@@ -21,10 +27,24 @@ type RegisterUserInput = {
 
 @Injectable()
 export class AuthService {
+  private readonly profileSelect = {
+    id: true,
+    fullName: true,
+    dateOfBirth: true,
+    email: true,
+    phoneNumber: true,
+    role: true,
+    active: true,
+    lastLoginAt: true,
+    createdAt: true,
+    updatedAt: true,
+  } as const;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly authConfigService: AuthConfigService,
+    private readonly mailService: MailService,
   ) {}
 
   async bootstrapAdmin(email: string, password: string, bootstrapKey: string) {
@@ -73,7 +93,7 @@ export class AuthService {
 
   async register(input: RegisterUserInput) {
     const normalizedEmail = this.normalizeEmail(input.email);
-    const normalizedPhone = input.phoneNumber?.trim() || null;
+    const normalizedPhone = normalizeVietnamPhoneNumber(input.phoneNumber);
     const passwordHash = await this.hashSecret(input.password);
 
     const user = await this.prisma.user.create({
@@ -86,6 +106,11 @@ export class AuthService {
         role: AppRole.USER,
         active: true,
       },
+    });
+
+    await this.mailService.notifyRegistrationCustomer({
+      fullName: user.fullName,
+      email: user.email,
     });
 
     return this.issueAuthTokens(user.id, user.email, user.role, true);
@@ -123,19 +148,66 @@ export class AuthService {
   async getProfile(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        fullName: true,
-        dateOfBirth: true,
-        email: true,
-        phoneNumber: true,
-        role: true,
-        active: true,
-        lastLoginAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: this.profileSelect,
     });
+  }
+
+  async updateProfile(userId: string, input: UpdateProfileDto) {
+    const data: Prisma.UserUpdateInput = {};
+
+    if (Object.hasOwn(input, 'fullName')) {
+      data.fullName = input.fullName?.trim() || null;
+    }
+
+    if (Object.hasOwn(input, 'dateOfBirth')) {
+      data.dateOfBirth = input.dateOfBirth ?? null;
+    }
+
+    if (Object.hasOwn(input, 'phoneNumber')) {
+      data.phoneNumber = normalizeVietnamPhoneNumber(input.phoneNumber);
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('No profile fields provided');
+    }
+
+    if (typeof data.phoneNumber === 'string') {
+      const existingUser = await this.prisma.user.findFirst({
+        where: {
+          phoneNumber: data.phoneNumber,
+          id: { not: userId },
+        },
+        select: { id: true },
+      });
+
+      if (existingUser) {
+        throw new ConflictException('Phone number already exists');
+      }
+    }
+
+    try {
+      return await this.prisma.user.update({
+        where: { id: userId },
+        data,
+        select: this.profileSelect,
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException('Phone number already exists');
+      }
+
+      throw error;
+    }
   }
 
   private async issueAuthTokens(
