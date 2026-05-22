@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AppRole } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { normalizeVietnamPhoneNumber } from '../../common/vietnam-phone';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -54,7 +55,7 @@ export class UsersService {
     role: AppRole;
   }) {
     const normalizedEmail = input.email.trim().toLowerCase();
-    const normalizedPhone = input.phoneNumber?.trim() || null;
+    const normalizedPhone = normalizeVietnamPhoneNumber(input.phoneNumber);
 
     const existingUser = await this.prisma.user.findFirst({
       where: {

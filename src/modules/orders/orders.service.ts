@@ -16,14 +16,18 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthConfigService } from '../auth/auth-config.service';
 import { JwtUserPayload } from '../auth/auth.types';
+import { MailService } from '../mail/mail.service';
 import { PaymentService } from '../payment/payment.service';
 import { TaxService } from '../tax/tax.service';
+import { CancelOrderDto } from './cancel-order.dto';
 import { CheckoutAddressDto } from './checkout-address.dto';
 import { CreateCheckoutOrderDto } from './create-checkout-order.dto';
 import { InvoiceAddressDto } from './invoice-address.dto';
 import { ListOrdersQuery } from './list-orders.query';
+import { OrderStaffNoteDto } from './order-staff-note.dto';
 import { PreviewCheckoutDto } from './preview-checkout.dto';
 import { PublicOrderLookupQuery } from './public-order-lookup.query';
+import { RejectOrderDto } from './reject-order.dto';
 import { ReviewPaymentDto } from './review-payment.dto';
 import { UpdateFulfillmentDto } from './update-fulfillment.dto';
 
@@ -107,6 +111,7 @@ export class OrdersService {
     private readonly paymentService: PaymentService,
     private readonly jwtService: JwtService,
     private readonly authConfigService: AuthConfigService,
+    private readonly mailService: MailService,
   ) {}
 
   async preview(identity: CheckoutIdentityInput, data: PreviewCheckoutDto) {
@@ -254,6 +259,8 @@ export class OrdersService {
       return createdOrder;
     });
 
+    await this.mailService.notifyOrderCreated(order.id);
+
     if (owner.userId) {
       return this.findOneForUser(owner.userId, order.id);
     }
@@ -342,6 +349,8 @@ export class OrdersService {
       },
     });
 
+    await this.mailService.notifyOrderStatusChanged(order.id);
+
     return this.findOneForUser(userId, order.id);
   }
 
@@ -381,6 +390,8 @@ export class OrdersService {
         paymentConfirmedByUserAt: new Date(),
       },
     });
+
+    await this.mailService.notifyOrderStatusChanged(order.id);
 
     return this.findPublicByOrderCodeAndEmail({
       orderCode: order.orderCode,
@@ -422,9 +433,80 @@ export class OrdersService {
     staffUserId: string,
     data: ReviewPaymentDto,
   ) {
+    if (data.action === 'APPROVE') {
+      return this.confirmPaymentByStaff(orderId, staffUserId, {
+        staffNote: data.staffNote,
+      });
+    }
+
+    return this.rejectPaymentByStaff(orderId, {
+      reason: data.rejectReason ?? '',
+      staffNote: data.staffNote,
+    });
+  }
+
+  async confirmOrder(orderId: string, data: OrderStaffNoteDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true },
+      select: {
+        id: true,
+        status: true,
+        paymentStatus: true,
+        staffNote: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    if (order.paymentStatus !== PaymentStatus.PAID) {
+      throw new BadRequestException(
+        'Order payment must be confirmed before confirming order',
+      );
+    }
+
+    if (this.isTerminalOrderStatus(order.status)) {
+      throw new BadRequestException('Order cannot be confirmed now');
+    }
+
+    const confirmableOrderStatuses: OrderStatus[] = [
+      OrderStatus.PENDING_PAYMENT,
+      OrderStatus.PAYMENT_REVIEW,
+      OrderStatus.CONFIRMED,
+    ];
+
+    if (!confirmableOrderStatuses.includes(order.status)) {
+      throw new BadRequestException('Order cannot be confirmed now');
+    }
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: OrderStatus.CONFIRMED,
+        fulfillmentStatus: FulfillmentStatus.NOT_STARTED,
+        staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
+      },
+    });
+
+    await this.mailService.notifyOrderStatusChanged(order.id);
+
+    return this.findOneForBackoffice(order.id);
+  }
+
+  async confirmPaymentByStaff(
+    orderId: string,
+    staffUserId: string,
+    data: OrderStaffNoteDto,
+  ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        status: true,
+        paymentStatus: true,
+        staffNote: true,
+      },
     });
 
     if (!order) {
@@ -440,44 +522,179 @@ export class OrdersService {
       throw new BadRequestException('Order payment cannot be reviewed now');
     }
 
-    if (data.action === 'APPROVE') {
-      await this.prisma.order.update({
-        where: { id: order.id },
-        data: {
-          status: OrderStatus.CONFIRMED,
-          paymentStatus: PaymentStatus.PAID,
-          paymentVerifiedAt: new Date(),
-          paymentVerifiedByStaffId: staffUserId,
-          paymentRejectReason: null,
-          staffNote: data.staffNote?.trim() || order.staffNote,
-        },
-      });
-      return this.findOneForBackoffice(order.id);
+    const confirmablePaymentStatuses: PaymentStatus[] = [
+      PaymentStatus.WAITING_CUSTOMER_TRANSFER,
+      PaymentStatus.CUSTOMER_CONFIRMED,
+    ];
+
+    if (!confirmablePaymentStatuses.includes(order.paymentStatus)) {
+      throw new BadRequestException('Order payment cannot be confirmed now');
     }
 
-    if (!data.rejectReason?.trim()) {
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: OrderStatus.CONFIRMED,
+        paymentStatus: PaymentStatus.PAID,
+        paymentVerifiedAt: new Date(),
+        paymentVerifiedByStaffId: staffUserId,
+        paymentRejectReason: null,
+        staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
+      },
+    });
+
+    await this.mailService.notifyOrderStatusChanged(order.id);
+
+    return this.findOneForBackoffice(order.id);
+  }
+
+  async rejectPaymentByStaff(orderId: string, data: RejectOrderDto) {
+    if (!data.reason?.trim()) {
       throw new BadRequestException('Payment reject reason is required');
     }
 
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const paymentReviewableStatuses: OrderStatus[] = [
+      OrderStatus.PENDING_PAYMENT,
+      OrderStatus.PAYMENT_REVIEW,
+    ];
+
+    const rejectablePaymentStatuses: PaymentStatus[] = [
+      PaymentStatus.WAITING_CUSTOMER_TRANSFER,
+      PaymentStatus.CUSTOMER_CONFIRMED,
+    ];
+
+    if (
+      !paymentReviewableStatuses.includes(order.status) ||
+      !rejectablePaymentStatuses.includes(order.paymentStatus)
+    ) {
+      throw new BadRequestException('Order payment cannot be rejected now');
+    }
+
     await this.prisma.$transaction(async (tx) => {
-      for (const item of order.items) {
-        await tx.productVariant.update({
-          where: { id: item.variantId },
-          data: {
-            stockQuantity: { increment: item.quantity },
-          },
-        });
-      }
+      await this.restoreOrderStock(tx, order.items);
 
       await tx.order.update({
         where: { id: order.id },
         data: {
           status: OrderStatus.REJECTED,
           paymentStatus: PaymentStatus.REJECTED,
-          paymentRejectReason: data.rejectReason!.trim(),
-          staffNote: data.staffNote?.trim() || order.staffNote,
+          paymentRejectReason: data.reason.trim(),
+          staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
         },
       });
+    });
+
+    await this.mailService.notifyOrderStatusChanged(order.id);
+
+    return this.findOneForBackoffice(order.id);
+  }
+
+  async rejectOrder(orderId: string, data: RejectOrderDto) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    if (this.isTerminalOrderStatus(order.status)) {
+      throw new BadRequestException('Order cannot be rejected now');
+    }
+
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      throw new BadRequestException('Paid orders cannot be rejected');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.restoreOrderStock(tx, order.items);
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          status: OrderStatus.REJECTED,
+          paymentStatus: PaymentStatus.REJECTED,
+          paymentRejectReason: data.reason.trim(),
+          staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
+        },
+      });
+    });
+
+    await this.mailService.notifyOrderStatusChanged(order.id);
+
+    return this.findOneForBackoffice(order.id);
+  }
+
+  async cancelOrder(orderId: string, data: CancelOrderDto) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    if (this.isTerminalOrderStatus(order.status)) {
+      throw new BadRequestException('Order cannot be cancelled now');
+    }
+
+    if (order.status === OrderStatus.SHIPPING) {
+      throw new BadRequestException('Shipping orders cannot be cancelled');
+    }
+
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      throw new BadRequestException('Paid orders require refund handling');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.restoreOrderStock(tx, order.items);
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          status: OrderStatus.CANCELLED,
+          paymentStatus: PaymentStatus.REJECTED,
+          paymentRejectReason: data.reason.trim(),
+          cancelledAt: new Date(),
+          staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
+        },
+      });
+    });
+
+    await this.mailService.notifyOrderStatusChanged(order.id);
+
+    return this.findOneForBackoffice(order.id);
+  }
+
+  async updateStaffNote(orderId: string, data: OrderStaffNoteDto) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        staffNote: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        staffNote: data.staffNote?.trim() || null,
+      },
     });
 
     return this.findOneForBackoffice(order.id);
@@ -528,6 +745,12 @@ export class OrdersService {
         staffNote: data.staffNote?.trim() || order.staffNote,
       },
     });
+
+    await this.mailService.notifyOrderStatusChanged(order.id);
+
+    if (orderStatus === OrderStatus.COMPLETED) {
+      await this.mailService.notifyOrderCompletedAdmin(order.id);
+    }
 
     return this.findOneForBackoffice(order.id);
   }
@@ -942,6 +1165,36 @@ export class OrdersService {
       case FulfillmentStatus.NOT_STARTED:
       default:
         return OrderStatus.CONFIRMED;
+    }
+  }
+
+  private isTerminalOrderStatus(status: OrderStatus) {
+    const terminalStatuses: OrderStatus[] = [
+      OrderStatus.CANCELLED,
+      OrderStatus.REJECTED,
+      OrderStatus.COMPLETED,
+    ];
+
+    return terminalStatuses.includes(status);
+  }
+
+  private resolveNextStaffNote(currentNote: string | null, nextNote?: string) {
+    return nextNote?.trim() || currentNote;
+  }
+
+  private async restoreOrderStock(
+    tx: Prisma.TransactionClient,
+    items: Array<
+      Pick<Prisma.OrderItemGetPayload<object>, 'variantId' | 'quantity'>
+    >,
+  ) {
+    for (const item of items) {
+      await tx.productVariant.update({
+        where: { id: item.variantId },
+        data: {
+          stockQuantity: { increment: item.quantity },
+        },
+      });
     }
   }
 
