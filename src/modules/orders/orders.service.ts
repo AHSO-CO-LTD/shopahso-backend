@@ -64,6 +64,8 @@ type PreviewItem = {
     slug: string;
     sku: string;
     unit: string | null;
+    originCountryCode: string | null;
+    pricingStatus: string;
     imageUrl: string | null;
     stockQuantity: number;
     minOrderQuantity: number;
@@ -820,6 +822,14 @@ export class OrdersService {
       });
     }
 
+    if (variant.pricingStatus === 'CONTACT_FOR_PRICE') {
+      issues.push({
+        code: 'CONTACT_FOR_PRICE',
+        severity: 'error',
+        message: 'Variant requires a custom quote',
+      });
+    }
+
     if (variant.stockQuantity <= 0) {
       issues.push({
         code: 'OUT_OF_STOCK',
@@ -868,6 +878,8 @@ export class OrdersService {
         slug: variant.slug,
         sku: variant.sku,
         unit: variant.unit,
+        originCountryCode: variant.originCountryCode,
+        pricingStatus: variant.pricingStatus,
         imageUrl: variant.imageUrls[0] ?? variant.product.imageUrls[0] ?? null,
         stockQuantity: variant.stockQuantity,
         minOrderQuantity: variant.minOrderQuantity,

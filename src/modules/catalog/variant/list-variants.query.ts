@@ -18,6 +18,7 @@ export type ListVariantsQuery = {
   productId?: string;
   categoryId?: string;
   brandId?: string;
+  originCountryCode?: string;
   priceMin?: string;
   priceMax?: string;
   page?: string;

@@ -76,6 +76,7 @@ export class VariantController {
       productId: readValue('productId'),
       categoryId: readValue('categoryId'),
       brandId: readValue('brandId'),
+      originCountryCode: readValue('originCountryCode'),
       priceMin: readValue('priceMin'),
       priceMax: readValue('priceMax'),
       page: readValue('page'),

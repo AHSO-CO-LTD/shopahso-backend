@@ -24,6 +24,11 @@ enum ProductStatus {
   PUBLISHED
 }
 
+enum VariantPricingStatus {
+  HAS_PRICE
+  CONTACT_FOR_PRICE
+}
+
 enum TaxScope {
   GLOBAL
   CATEGORY
@@ -139,12 +144,14 @@ model ProductVariant {
   brandId                String?                 @map("brand_id")
   sku                    String                  @unique
   manufacturerPartNumber String?                 @map("manufacturer_part_number")
+  originCountryCode      String?                 @map("origin_country_code")
   name                   String
   slug                   String                  @unique
   price                  Decimal                 @db.Decimal(12, 2)
   costPrice              Decimal                 @map("cost_price") @db.Decimal(12, 2)
   salePrice              Decimal?                @map("sale_price") @db.Decimal(12, 2)
   discountPercent        Decimal?                @map("discount_percent") @db.Decimal(5, 2)
+  pricingStatus          VariantPricingStatus    @default(HAS_PRICE) @map("pricing_status")
   taxPercent             Decimal?                @map("tax_percent") @db.Decimal(5, 2)
   stockQuantity          Int                     @default(0) @map("stock_quantity")
   unit                   String?
@@ -169,6 +176,7 @@ model ProductVariant {
   @@index([categoryId, score(sort: Desc)], map: "idx_variants_category_score")
   @@index([brandId, score(sort: Desc)], map: "idx_variants_brand_score")
   @@index([productId], map: "idx_variants_product_id")
+  @@index([originCountryCode], map: "idx_variants_origin_country_code")
   @@index([manufacturerPartNumber], map: "idx_variants_mpn")
   @@map("product_variants")
 }

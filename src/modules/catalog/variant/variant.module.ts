@@ -8,9 +8,10 @@ import { CategoryModule } from '../category/category.module';
 import { AuthModule } from '../../auth/auth.module';
 import { MediaModule } from '../../media/media.module';
 import { TaxModule } from '../../tax/tax.module';
+import { CountryModule } from '../../../common/countries/country.module';
 
 @Module({
-  imports: [CategoryModule, AuthModule, MediaModule, TaxModule],
+  imports: [CategoryModule, AuthModule, MediaModule, TaxModule, CountryModule],
   controllers: [
     VariantController,
     BackofficeVariantController,
