@@ -5,6 +5,7 @@ import { BrandModule } from './brand/brand.module';
 import { ProductModule } from './product/product.module';
 import { VariantModule } from './variant/variant.module';
 import { AttributeModule } from './attribute/attribute.module';
+import { CountryModule } from '../../common/countries/country.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { AttributeModule } from './attribute/attribute.module';
     ProductModule,
     VariantModule,
     AttributeModule,
+    CountryModule,
   ],
   providers: [PrismaService],
   exports: [PrismaService],

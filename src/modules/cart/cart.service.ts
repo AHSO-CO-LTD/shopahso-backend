@@ -288,6 +288,10 @@ export class CartService {
     if (variant.product.status !== 'PUBLISHED') {
       throw new BadRequestException('Product is not published');
     }
+
+    if (variant.pricingStatus === 'CONTACT_FOR_PRICE') {
+      throw new BadRequestException('Variant requires a custom quote');
+    }
   }
 
   private ensureQuantityDoesNotExceedStock(quantity: number, stock: number) {
@@ -344,6 +348,7 @@ export class CartService {
           item.variant.active &&
           item.variant.product.active &&
           item.variant.product.status === 'PUBLISHED' &&
+          item.variant.pricingStatus === 'HAS_PRICE' &&
           item.variant.stockQuantity > 0;
 
         return {
@@ -365,6 +370,8 @@ export class CartService {
             slug: item.variant.slug,
             sku: item.variant.sku,
             unit: item.variant.unit,
+            originCountryCode: item.variant.originCountryCode,
+            pricingStatus: item.variant.pricingStatus,
             imageUrls: this.resolveEffectiveImageUrls(item.variant),
           },
           snapshot: {
@@ -379,6 +386,7 @@ export class CartService {
           current: {
             price: item.variant.price.toString(),
             salePrice: item.variant.salePrice?.toString() ?? null,
+            pricingStatus: item.variant.pricingStatus,
             effectivePrice: currentEffectivePrice.toString(),
             subtotal: currentSubtotal.toString(),
             tax: {

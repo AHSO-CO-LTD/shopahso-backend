@@ -3,7 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AttributeDataType, Prisma } from '@prisma/client';
+import {
+  AttributeDataType,
+  Prisma,
+  VariantPricingStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateVariantDto } from './create-variant.dto';
 import { UpdateVariantDto } from './update-variant.dto';
@@ -15,6 +19,7 @@ import {
 } from './list-variants.query';
 import { CloudinaryService } from '../../media/cloudinary.service';
 import { TaxService } from '../../tax/tax.service';
+import { CountryService } from '../../../common/countries/country.service';
 
 type UploadedImageFile = {
   buffer: Buffer;
@@ -42,9 +47,11 @@ type NormalizedVariantImportRow = {
   variantName: string;
   sku: string;
   manufacturerPartNumber: string | null;
+  originCountryCode: string | null;
   slug: string;
   price: Prisma.Decimal;
   costPrice: Prisma.Decimal;
+  pricingStatus: VariantPricingStatus;
   stockQuantity: number;
   unit: string;
   attributeValues: NormalizedVariantImportAttributeValue[];
@@ -68,6 +75,7 @@ export class VariantService {
     private readonly categoryService: CategoryService,
     private readonly cloudinaryService: CloudinaryService,
     private readonly taxService: TaxService,
+    private readonly countryService: CountryService,
   ) {}
 
   findAllBackoffice() {
@@ -133,6 +141,9 @@ export class VariantService {
 
   async create(data: CreateVariantDto) {
     const product = await this.ensureProductExists(data.productId);
+    const originCountryCode = this.resolveOriginCountryCode(
+      data.originCountryCode,
+    );
 
     const createData: Prisma.ProductVariantUncheckedCreateInput = {
       productId: product.id,
@@ -140,6 +151,7 @@ export class VariantService {
       brandId: product.brandId,
       sku: data.sku,
       manufacturerPartNumber: data.manufacturerPartNumber,
+      originCountryCode,
       name: data.name,
       slug: data.slug,
       price: new Prisma.Decimal(data.price),
@@ -150,6 +162,7 @@ export class VariantService {
       ...(data.discountPercent !== undefined
         ? { discountPercent: new Prisma.Decimal(data.discountPercent) }
         : {}),
+      pricingStatus: data.pricingStatus ?? 'HAS_PRICE',
       ...(data.taxPercent !== undefined
         ? { taxPercent: new Prisma.Decimal(data.taxPercent) }
         : {}),
@@ -276,6 +289,10 @@ export class VariantService {
     if (data.productId) {
       productMeta = await this.ensureProductExists(data.productId);
     }
+    const originCountryCode =
+      data.originCountryCode !== undefined
+        ? this.resolveOriginCountryCode(data.originCountryCode)
+        : undefined;
 
     const updateData: Prisma.ProductVariantUncheckedUpdateInput = {
       ...(data.productId !== undefined ? { productId: data.productId } : {}),
@@ -286,6 +303,7 @@ export class VariantService {
       ...(data.manufacturerPartNumber !== undefined
         ? { manufacturerPartNumber: data.manufacturerPartNumber }
         : {}),
+      ...(data.originCountryCode !== undefined ? { originCountryCode } : {}),
       ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.slug !== undefined ? { slug: data.slug } : {}),
       ...(data.price !== undefined
@@ -299,6 +317,9 @@ export class VariantService {
         : {}),
       ...(data.discountPercent !== undefined
         ? { discountPercent: new Prisma.Decimal(data.discountPercent) }
+        : {}),
+      ...(data.pricingStatus !== undefined
+        ? { pricingStatus: data.pricingStatus }
         : {}),
       ...(data.taxPercent !== undefined
         ? { taxPercent: new Prisma.Decimal(data.taxPercent) }
@@ -460,9 +481,13 @@ export class VariantService {
         no: row.no,
         variantName: row.variantName,
         sku: row.sku,
+        originCountryCode: row.originCountryCode,
+        originCountryName:
+          this.countryService.resolve(row.originCountryCode)?.nameVi ?? null,
         slug: row.slug,
         price: row.price.toString(),
         costPrice: row.costPrice.toString(),
+        pricingStatus: row.pricingStatus,
         stockQuantity: row.stockQuantity,
         unit: row.unit,
       })),
@@ -490,6 +515,8 @@ export class VariantService {
         name: string;
         sku: string;
         slug: string;
+        pricingStatus: VariantPricingStatus;
+        originCountryCode: string | null;
       }> = [];
 
       for (const row of plan.rows) {
@@ -504,10 +531,12 @@ export class VariantService {
             brandId: product.brandId,
             sku: row.sku,
             manufacturerPartNumber: row.manufacturerPartNumber,
+            originCountryCode: row.originCountryCode,
             name: row.variantName,
             slug: row.slug,
             price: row.price,
             costPrice: row.costPrice,
+            pricingStatus: row.pricingStatus,
             stockQuantity: row.stockQuantity,
             unit: row.unit,
             minOrderQuantity: 1,
@@ -527,6 +556,8 @@ export class VariantService {
             name: true,
             sku: true,
             slug: true,
+            pricingStatus: true,
+            originCountryCode: true,
           },
         });
 
@@ -579,7 +610,20 @@ export class VariantService {
     });
 
     const parsed = this.parseCsvContent(fileBuffer);
-    const baseColumns = this.getVariantImportBaseColumns();
+    const allBaseColumns = this.getVariantImportBaseColumns();
+    const originCountryColumn = allBaseColumns.find(
+      (column) => column.key === 'originCountry',
+    )!;
+    const requiredBaseColumns = allBaseColumns.filter(
+      (column) => column.key !== 'originCountry',
+    );
+    const hasOriginCountryColumn = this.isHeaderMatch(
+      parsed.headers[requiredBaseColumns.length] ?? '',
+      originCountryColumn.aliases,
+    );
+    const baseColumns = hasOriginCountryColumn
+      ? allBaseColumns
+      : requiredBaseColumns;
     const expectedAttributeColumns = definitions.map(
       (definition) => definition.name,
     );
@@ -661,6 +705,9 @@ export class VariantService {
       const costPriceRaw = this.getCsvCell(row.cells, 5);
       const stockQuantityRaw = this.getCsvCell(row.cells, 6);
       const unit = this.getCsvCell(row.cells, 7);
+      const originCountryRaw = hasOriginCountryColumn
+        ? this.getCsvCell(row.cells, 8)
+        : '';
 
       if (!variantName) {
         rowErrors.push({
@@ -693,18 +740,22 @@ export class VariantService {
         }
       }
 
-      const price = this.parseDecimalCell(
+      const price = this.parseImportPriceCell(
         priceRaw,
         row.rowNumber,
         parsed.headers[4] ?? 'Giá bán',
         rowErrors,
       );
       const costPrice = this.parseDecimalCell(
-        costPriceRaw || priceRaw,
+        costPriceRaw || priceRaw || '0',
         row.rowNumber,
         parsed.headers[5] ?? 'Giá nhập',
         rowErrors,
       );
+      const pricingStatus =
+        !price || price.isZero()
+          ? VariantPricingStatus.CONTACT_FOR_PRICE
+          : VariantPricingStatus.HAS_PRICE;
       const stockQuantity = this.parseIntegerCell(
         stockQuantityRaw,
         row.rowNumber,
@@ -719,6 +770,13 @@ export class VariantService {
           message: 'Đơn vị là bắt buộc',
         });
       }
+
+      const originCountry = this.resolveImportOriginCountry(
+        originCountryRaw,
+        row.rowNumber,
+        parsed.headers[8] ?? 'Xuất xứ',
+        rowErrors,
+      );
 
       const normalizedAttributeValues: NormalizedVariantImportAttributeValue[] =
         [];
@@ -786,9 +844,11 @@ export class VariantService {
         variantName,
         sku,
         manufacturerPartNumber: manufacturerPartNumberRaw || null,
+        originCountryCode: originCountry?.code ?? null,
         slug,
-        price: price!,
+        price: price ?? new Prisma.Decimal(0),
         costPrice: costPrice!,
+        pricingStatus,
         stockQuantity: stockQuantity!,
         unit,
         attributeValues: normalizedAttributeValues,
@@ -993,6 +1053,43 @@ export class VariantService {
     return new Prisma.Decimal(parsed);
   }
 
+  private parseImportPriceCell(
+    rawValue: string,
+    rowNumber: number,
+    field: string,
+    rowErrors: VariantImportError[],
+  ) {
+    if (!rawValue) {
+      return null;
+    }
+
+    return this.parseDecimalCell(rawValue, rowNumber, field, rowErrors);
+  }
+
+  private resolveImportOriginCountry(
+    rawValue: string,
+    rowNumber: number,
+    field: string,
+    rowErrors: VariantImportError[],
+  ) {
+    if (!rawValue) {
+      return null;
+    }
+
+    const country = this.countryService.resolve(rawValue);
+    if (!country) {
+      rowErrors.push({
+        rowNumber,
+        field,
+        message:
+          'Xuất xứ không hợp lệ. Vui lòng dùng mã ISO như CN, VN, TH hoặc tên quốc gia hợp lệ.',
+      });
+      return null;
+    }
+
+    return country;
+  }
+
   private parseIntegerCell(
     rawValue: string,
     rowNumber: number,
@@ -1184,6 +1281,23 @@ export class VariantService {
     return (cells[index] ?? '').trim();
   }
 
+  private resolveOriginCountryCode(value?: string | null) {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    if (value === null || value.trim() === '') {
+      return null;
+    }
+
+    const country = this.countryService.resolve(value);
+    if (!country) {
+      throw new BadRequestException('Origin country is invalid');
+    }
+
+    return country.code;
+  }
+
   private getVariantImportBaseColumns() {
     return [
       {
@@ -1225,6 +1339,11 @@ export class VariantService {
         key: 'unit',
         label: 'don vi',
         aliases: ['don vi', 'unit'],
+      },
+      {
+        key: 'originCountry',
+        label: 'xuat xu',
+        aliases: ['xuat xu', 'origin', 'origin country', 'country'],
       },
     ] as const;
   }
@@ -1293,6 +1412,19 @@ export class VariantService {
     if (query.brandId) {
       andConditions.push({
         brandId: query.brandId,
+      });
+    }
+
+    if (query.originCountryCode) {
+      const originCountryCode = this.countryService.requireValidCode(
+        query.originCountryCode,
+      );
+      if (!originCountryCode) {
+        return { id: '__invalid_origin_country__' };
+      }
+
+      andConditions.push({
+        originCountryCode,
       });
     }
 
