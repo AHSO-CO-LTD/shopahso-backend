@@ -112,29 +112,43 @@ model Brand {
 }
 
 model Product {
-  id             String                       @id @default(uuid())
-  categoryId     String                       @map("category_id")
-  brandId        String?                      @map("brand_id")
-  name           String
-  slug           String                       @unique
-  description    String?
-  datasheetUrl   String?                      @map("datasheet_url")
-  imageUrls      String[]                     @default([]) @map("image_urls")
-  imagePublicIds String[]                     @default([]) @map("image_public_ids")
-  status         ProductStatus                @default(DRAFT)
-  active         Boolean                      @default(true)
-  createdAt      DateTime                     @default(now()) @map("created_at")
-  updatedAt      DateTime                     @updatedAt @map("updated_at")
-  category       Category                     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  brand          Brand?                       @relation(fields: [brandId], references: [id], onDelete: SetNull)
-  variants       ProductVariant[]
-  cartItems      CartItem[]
-  orderItems     OrderItem[]
-  attributes     ProductAttributeDefinition[]
+  id                String                       @id @default(uuid())
+  categoryId        String                       @map("category_id")
+  brandId           String?                      @map("brand_id")
+  name              String
+  slug              String                       @unique
+  description       String?
+  datasheetUrl      String?                      @map("datasheet_url")
+  imageUrls         String[]                     @default([]) @map("image_urls")
+  imagePublicIds    String[]                     @default([]) @map("image_public_ids")
+  status            ProductStatus                @default(DRAFT)
+  active            Boolean                      @default(true)
+  createdAt         DateTime                     @default(now()) @map("created_at")
+  updatedAt         DateTime                     @updatedAt @map("updated_at")
+  category          Category                     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand             Brand?                       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  variants          ProductVariant[]
+  cartItems         CartItem[]
+  orderItems        OrderItem[]
+  attributes        ProductAttributeDefinition[]
+  descriptionAssets ProductDescriptionAsset[]
 
   @@index([categoryId, active], map: "idx_products_category_active")
   @@index([brandId, active], map: "idx_products_brand_active")
   @@map("products")
+}
+
+model ProductDescriptionAsset {
+  id        String   @id @default(uuid())
+  productId String   @map("product_id")
+  url       String
+  publicId  String   @unique @map("public_id")
+  alt       String?
+  createdAt DateTime @default(now()) @map("created_at")
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt], map: "idx_product_description_assets_product_created")
+  @@map("product_description_assets")
 }
 
 model ProductVariant {

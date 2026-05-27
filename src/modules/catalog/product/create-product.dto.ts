@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  MaxLength,
   IsOptional,
   IsString,
   IsUrl,
@@ -33,6 +34,7 @@ export class CreateProductDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(50000)
   description?: string;
 
   @ApiPropertyOptional()

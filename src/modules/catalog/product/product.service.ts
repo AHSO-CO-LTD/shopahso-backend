@@ -5,10 +5,13 @@ import { CreateProductDto } from './create-product.dto';
 import { UpdateProductDto } from './update-product.dto';
 import { CloudinaryService } from '../../media/cloudinary.service';
 import { TaxService } from '../../tax/tax.service';
+import { sanitizeProductDescriptionHtml } from '../../../common/utils/sanitize-html.util';
+import { ListDescriptionAssetsQuery } from './list-description-assets.query';
 
 type UploadedImageFile = {
   buffer: Buffer;
   mimetype: string;
+  originalname?: string;
 };
 
 @Injectable()
@@ -139,7 +142,7 @@ export class ProductService {
           brandId: data.brandId,
           name: data.name,
           slug: data.slug,
-          description: data.description,
+          description: sanitizeProductDescriptionHtml(data.description),
           datasheetUrl: data.datasheetUrl,
           imageUrls: data.imageUrls ?? [],
           imagePublicIds: [],
@@ -254,7 +257,9 @@ export class ProductService {
           ...(data.name !== undefined ? { name: data.name } : {}),
           ...(data.slug !== undefined ? { slug: data.slug } : {}),
           ...(data.description !== undefined
-            ? { description: data.description }
+            ? {
+                description: sanitizeProductDescriptionHtml(data.description),
+              }
             : {}),
           ...(data.datasheetUrl !== undefined
             ? { datasheetUrl: data.datasheetUrl }
@@ -330,6 +335,89 @@ export class ProductService {
       data: {
         imageUrls: [...product.imageUrls, uploaded.secureUrl],
         imagePublicIds: [...product.imagePublicIds, uploaded.publicId],
+      },
+    });
+  }
+
+  async uploadDescriptionImage(id: string, file: UploadedImageFile) {
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const timestamp = Date.now();
+    const alt = this.createDescriptionImageAlt(file.originalname, product.name);
+    const uploaded = await this.cloudinaryService.uploadBuffer({
+      buffer: file.buffer,
+      folder: 'products/descriptions',
+      publicId: `${product.slug}-description-${timestamp}`,
+    });
+
+    const asset = await this.prisma.productDescriptionAsset.create({
+      data: {
+        productId: product.id,
+        url: uploaded.secureUrl,
+        publicId: uploaded.publicId,
+        alt,
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
+    });
+
+    return {
+      id: asset.id,
+      url: asset.url,
+      publicId: asset.publicId,
+      alt: asset.alt,
+      product: asset.product,
+      createdAt: asset.createdAt,
+    };
+  }
+
+  async findDescriptionAssets(query: ListDescriptionAssetsQuery) {
+    const where: Prisma.ProductDescriptionAssetWhereInput = {};
+
+    if (query.productId) {
+      where.productId = query.productId;
+    }
+
+    const search = query.search?.trim();
+    if (search) {
+      where.OR = [
+        { alt: { contains: search, mode: 'insensitive' } },
+        { publicId: { contains: search, mode: 'insensitive' } },
+        { product: { name: { contains: search, mode: 'insensitive' } } },
+        { product: { slug: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    return this.prisma.productDescriptionAsset.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: query.limit ?? 60,
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
       },
     });
   }
@@ -477,5 +565,19 @@ export class ProductService {
     if (!product) {
       throw new NotFoundException('Product not found');
     }
+  }
+
+  private createDescriptionImageAlt(
+    originalName: string | undefined,
+    productName: string,
+  ) {
+    const fileName = originalName?.replace(/\.[^/.]+$/, '').trim();
+    const source = fileName || productName;
+
+    return source
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
   }
 }
