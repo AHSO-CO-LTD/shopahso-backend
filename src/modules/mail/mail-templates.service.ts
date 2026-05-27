@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { FulfillmentStatus, OrderStatus, PaymentStatus } from '@prisma/client';
+import {
+  FulfillmentStatus,
+  OrderStatus,
+  PaymentStatus,
+  QuoteRequestStatus,
+} from '@prisma/client';
 
 type TemplateResult = {
   subject: string;
@@ -32,6 +37,25 @@ type OrderTemplateInput = {
   paymentTransferContent: string | null;
   paymentRejectReason: string | null;
   items: OrderTemplateItem[];
+};
+
+type QuoteRequestTemplateInput = {
+  requestCode: string;
+  requestGroupCode: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  quantity: number;
+  status: QuoteRequestStatus;
+  staffNote: string | null;
+  product: {
+    name: string;
+    slug: string;
+  };
+  variant: {
+    name: string;
+    sku: string;
+  };
 };
 
 @Injectable()
@@ -214,6 +238,109 @@ export class MailTemplatesService {
     });
   }
 
+  quoteRequestCreatedForCustomer(input: {
+    requests: QuoteRequestTemplateInput[];
+  }) {
+    const firstRequest = input.requests[0];
+    const subject = `Shop AHSO đã nhận yêu cầu báo giá ${firstRequest.requestGroupCode}`;
+    const intro =
+      'Shop AHSO đã ghi nhận yêu cầu báo giá của bạn. Nhân viên phụ trách sẽ kiểm tra thông tin và liên hệ trực tiếp trong thời gian sớm nhất.';
+    const sections = [
+      this.noticeBox('Yêu cầu báo giá đã được ghi nhận', intro),
+      this.infoList([
+        ['Mã nhóm yêu cầu', firstRequest.requestGroupCode],
+        ['Khách hàng', firstRequest.customerName],
+        ['Email', firstRequest.customerEmail],
+        ['Số điện thoại', firstRequest.customerPhone],
+      ]),
+      this.quoteItemsHtml(input.requests),
+    ];
+
+    return this.layout({
+      subject,
+      greetingName: firstRequest.customerName || firstRequest.customerEmail,
+      intro,
+      sections,
+      textLines: [
+        `Xin chào ${firstRequest.customerName || firstRequest.customerEmail},`,
+        intro,
+        `Mã nhóm yêu cầu: ${firstRequest.requestGroupCode}`,
+        ...input.requests.map(
+          (request) =>
+            `${request.requestCode}: ${request.product.name} - ${request.variant.name} (${request.variant.sku})`,
+        ),
+      ],
+    });
+  }
+
+  quoteRequestCreatedForAdmin(input: {
+    requests: QuoteRequestTemplateInput[];
+    backofficeUrl: string;
+  }) {
+    const firstRequest = input.requests[0];
+    const subject = `Yêu cầu báo giá mới ${firstRequest.requestGroupCode}`;
+    const intro =
+      'Shop AHSO vừa nhận yêu cầu báo giá mới. Vui lòng mở backoffice để kiểm tra và nhận xử lý.';
+    const sections = [
+      this.noticeBox('Có yêu cầu báo giá mới cần xử lý', intro),
+      this.infoList([
+        ['Mã nhóm yêu cầu', firstRequest.requestGroupCode],
+        ['Khách hàng', firstRequest.customerName],
+        ['Email', firstRequest.customerEmail],
+        ['Số điện thoại', firstRequest.customerPhone],
+      ]),
+      this.quoteItemsHtml(input.requests),
+      this.button('Mở yêu cầu báo giá trong backoffice', input.backofficeUrl),
+    ];
+
+    return this.layout({
+      subject,
+      greetingName: 'đội ngũ Shop AHSO',
+      intro,
+      sections,
+      textLines: [
+        intro,
+        `Mã nhóm yêu cầu: ${firstRequest.requestGroupCode}`,
+        `Khách hàng: ${firstRequest.customerName}`,
+        `Email: ${firstRequest.customerEmail}`,
+        `Số điện thoại: ${firstRequest.customerPhone}`,
+        `Backoffice: ${input.backofficeUrl}`,
+      ],
+    });
+  }
+
+  quoteRequestStatusForCustomer(input: { request: QuoteRequestTemplateInput }) {
+    const statusLabel = this.quoteRequestStatusLabel(input.request.status);
+    const subject = `Cập nhật yêu cầu báo giá ${input.request.requestCode}: ${statusLabel}`;
+    const intro = `Yêu cầu báo giá ${input.request.requestCode} vừa được cập nhật trạng thái: ${statusLabel}.`;
+    const sections = [
+      this.noticeBox('Yêu cầu báo giá vừa có cập nhật', intro),
+      this.infoList([
+        ['Mã yêu cầu', input.request.requestCode],
+        ['Sản phẩm', input.request.product.name],
+        ['Phiên bản', input.request.variant.name],
+        ['SKU', input.request.variant.sku],
+        ['Trạng thái', statusLabel],
+        ['Ghi chú', input.request.staffNote || 'Không có'],
+      ]),
+    ];
+
+    return this.layout({
+      subject,
+      greetingName: input.request.customerName || input.request.customerEmail,
+      intro,
+      sections,
+      textLines: [
+        `Xin chào ${input.request.customerName || input.request.customerEmail},`,
+        intro,
+        `Sản phẩm: ${input.request.product.name}`,
+        `Phiên bản: ${input.request.variant.name}`,
+        `Trạng thái: ${statusLabel}`,
+        `Ghi chú: ${input.request.staffNote || 'Không có'}`,
+      ],
+    });
+  }
+
   test(input: { email: string }) {
     const subject = 'Kiểm tra cấu hình email Shop AHSO';
     const intro =
@@ -378,6 +505,39 @@ export class MailTemplatesService {
     `;
   }
 
+  private quoteItemsHtml(items: QuoteRequestTemplateInput[]) {
+    const rows = items
+      .map(
+        (item) => `
+          <tr>
+            <td style="padding:12px;border-bottom:1px solid #e5e7eb">
+              <div style="font-size:14px;font-weight:700;color:#111827">${this.escape(item.product.name)}</div>
+              <div style="font-size:13px;color:#6b7280;margin-top:4px">${this.escape(item.variant.name)}</div>
+            </td>
+            <td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:13px">${this.escape(item.variant.sku)}</td>
+            <td style="padding:12px;border-bottom:1px solid #e5e7eb;text-align:right;color:#374151;font-size:13px">${item.quantity}</td>
+            <td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:13px;font-weight:700">${this.escape(item.requestCode)}</td>
+          </tr>
+        `,
+      )
+      .join('');
+
+    return `
+      <div style="margin:22px 0 8px;font-size:15px;font-weight:700;color:#111827">Sản phẩm cần báo giá</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-collapse:collapse">
+        <thead>
+          <tr>
+            <th align="left" style="padding:10px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;color:#374151;font-size:12px;text-transform:uppercase">Sản phẩm</th>
+            <th align="left" style="padding:10px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;color:#374151;font-size:12px;text-transform:uppercase">SKU</th>
+            <th align="right" style="padding:10px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;color:#374151;font-size:12px;text-transform:uppercase">SL</th>
+            <th align="left" style="padding:10px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;color:#374151;font-size:12px;text-transform:uppercase">Mã yêu cầu</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
   private paymentHtml(order: OrderTemplateInput) {
     const rows: Array<[string, string]> = [];
 
@@ -499,6 +659,17 @@ export class MailTemplatesService {
       PAID: 'Đã thanh toán',
       REJECTED: 'Thanh toán bị từ chối',
       REFUNDED: 'Đã hoàn tiền',
+    };
+
+    return labels[status];
+  }
+
+  private quoteRequestStatusLabel(status: QuoteRequestStatus) {
+    const labels: Record<QuoteRequestStatus, string> = {
+      PENDING: 'Đang chờ',
+      QUOTED: 'Đã nhận báo giá',
+      CANCELLED: 'Đã hủy',
+      CLOSED: 'Đã đóng',
     };
 
     return labels[status];

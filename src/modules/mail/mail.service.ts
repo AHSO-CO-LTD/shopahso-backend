@@ -7,7 +7,6 @@ import { MailTemplatesService } from './mail-templates.service';
 import { UpdateMailSettingDto } from './update-mail-setting.dto';
 
 type OrderWithItems = Prisma.OrderGetPayload<{ include: { items: true } }>;
-
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -201,6 +200,66 @@ export class MailService {
     });
   }
 
+  async notifyQuoteRequestCreated(requestIds: string[]) {
+    await this.runNotification('quote request created', async (setting) => {
+      const requests = await this.findQuoteRequests(requestIds);
+      if (requests.length === 0) {
+        return;
+      }
+
+      const tasks: Promise<void>[] = [];
+      const customerEmail = requests[0].customerEmail;
+
+      const customerTemplate = this.templates.quoteRequestCreatedForCustomer({
+        requests,
+      });
+      tasks.push(
+        this.sendMail({
+          to: customerEmail,
+          subject: customerTemplate.subject,
+          html: customerTemplate.html,
+          text: customerTemplate.text,
+        }),
+      );
+
+      if (setting.adminOrderRecipients.length > 0) {
+        const adminTemplate = this.templates.quoteRequestCreatedForAdmin({
+          requests,
+          backofficeUrl: this.buildBackofficeQuoteRequestUrl(
+            requests[0].requestGroupCode,
+          ),
+        });
+
+        tasks.push(
+          this.sendMail({
+            to: setting.adminOrderRecipients,
+            subject: adminTemplate.subject,
+            html: adminTemplate.html,
+            text: adminTemplate.text,
+          }),
+        );
+      }
+
+      await Promise.all(tasks);
+    });
+  }
+
+  async notifyQuoteRequestStatusChanged(requestId: string) {
+    await this.runNotification('quote request status changed', async () => {
+      const request = await this.findQuoteRequest(requestId);
+      const template = this.templates.quoteRequestStatusForCustomer({
+        request,
+      });
+
+      await this.sendMail({
+        to: request.customerEmail,
+        subject: template.subject,
+        html: template.html,
+        text: template.text,
+      });
+    });
+  }
+
   private async runNotification(
     label: string,
     callback: (setting: MailSetting) => Promise<void>,
@@ -262,6 +321,21 @@ export class MailService {
     });
   }
 
+  private findQuoteRequests(requestIds: string[]) {
+    return this.prisma.quoteRequest.findMany({
+      where: { id: { in: requestIds } },
+      orderBy: { createdAt: 'asc' },
+      include: { product: true, variant: true },
+    });
+  }
+
+  private findQuoteRequest(requestId: string) {
+    return this.prisma.quoteRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      include: { product: true, variant: true },
+    });
+  }
+
   private buildOrderLookupUrl(order: OrderWithItems) {
     const params = new URLSearchParams({
       orderCode: order.orderCode,
@@ -273,6 +347,11 @@ export class MailService {
 
   private buildBackofficeOrderUrl(orderId: string) {
     return `${this.config.backofficeOrderUrl}/${encodeURIComponent(orderId)}`;
+  }
+
+  private buildBackofficeQuoteRequestUrl(requestGroupCode: string) {
+    const params = new URLSearchParams({ requestCode: requestGroupCode });
+    return `${this.config.backofficeQuoteRequestUrl}?${params.toString()}`;
   }
 
   private resolveFallbackAdminRecipients() {

@@ -12,6 +12,7 @@ import { AddressModule } from './modules/address/address.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { MailModule } from './modules/mail/mail.module';
+import { QuoteRequestsModule } from './modules/quote-requests/quote-requests.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { MailModule } from './modules/mail/mail.module';
     PaymentModule,
     OrdersModule,
     MailModule,
+    QuoteRequestsModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
