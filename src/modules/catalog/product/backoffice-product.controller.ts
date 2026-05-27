@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -22,10 +23,12 @@ import { RolesGuard } from '../../auth/roles.guard';
 import { Roles } from '../../auth/roles.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RemoveImageDto } from '../../media/remove-image.dto';
+import { ListDescriptionAssetsQuery } from './list-description-assets.query';
 
 type UploadedImageFile = {
   buffer: Buffer;
   mimetype: string;
+  originalname?: string;
 };
 
 @UseGuards(AccessTokenGuard, RolesGuard)
@@ -43,6 +46,11 @@ export class BackofficeProductController {
   @Get()
   findAll() {
     return this.productService.findAllBackoffice();
+  }
+
+  @Get('description-images')
+  findDescriptionAssets(@Query() query: ListDescriptionAssetsQuery) {
+    return this.productService.findDescriptionAssets(query);
   }
 
   @Get(':id')
@@ -80,6 +88,27 @@ export class BackofficeProductController {
     }
 
     return this.productService.uploadImage(id, file);
+  }
+
+  @Post(':id/description-images')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadDescriptionImage(
+    @Param('id') id: string,
+    @UploadedFile() file?: UploadedImageFile,
+  ) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException('Only image files are allowed');
+    }
+
+    return this.productService.uploadDescriptionImage(id, file);
   }
 
   @Delete(':id/images')
