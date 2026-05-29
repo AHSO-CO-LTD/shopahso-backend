@@ -68,6 +68,21 @@ type VariantImportPlan = {
   rows: NormalizedVariantImportRow[];
 };
 
+type VariantImportBaseColumn = {
+  key:
+    | 'no'
+    | 'variantName'
+    | 'sku'
+    | 'manufacturerPartNumber'
+    | 'price'
+    | 'costPrice'
+    | 'stockQuantity'
+    | 'unit'
+    | 'originCountry';
+  label: string;
+  aliases: readonly string[];
+};
+
 @Injectable()
 export class VariantService {
   constructor(
@@ -1298,7 +1313,7 @@ export class VariantService {
     return country.code;
   }
 
-  private getVariantImportBaseColumns() {
+  private getVariantImportBaseColumns(): readonly VariantImportBaseColumn[] {
     return [
       {
         key: 'no',

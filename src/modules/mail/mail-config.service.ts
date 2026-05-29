@@ -41,6 +41,13 @@ export class MailConfigService {
     );
   }
 
+  get backofficeQuoteRequestUrl() {
+    return (
+      this.normalizeUrl(process.env.BACKOFFICE_QUOTE_REQUEST_URL) ||
+      `${this.shopUrl}/nhan-vien/bao-gia`
+    );
+  }
+
   get enabled() {
     return Boolean(this.host && this.user && this.pass && this.fromEmail);
   }

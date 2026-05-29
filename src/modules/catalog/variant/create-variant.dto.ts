@@ -15,6 +15,7 @@ import {
   Min,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import type { TransformFnParams } from 'class-transformer';
 
 export const VARIANT_PRICING_STATUSES = [
   'HAS_PRICE',
@@ -43,9 +44,10 @@ export class CreateVariantDto {
     example: 'CN',
   })
   @IsOptional()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
-  )
+  @Transform(({ value }: TransformFnParams): unknown => {
+    const input: unknown = value;
+    return typeof input === 'string' ? input.trim().toUpperCase() : input;
+  })
   @IsString()
   @Length(2, 2)
   originCountryCode?: string;

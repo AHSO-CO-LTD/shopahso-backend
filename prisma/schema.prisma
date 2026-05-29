@@ -29,6 +29,13 @@ enum VariantPricingStatus {
   CONTACT_FOR_PRICE
 }
 
+enum QuoteRequestStatus {
+  PENDING
+  QUOTED
+  CANCELLED
+  CLOSED
+}
+
 enum TaxScope {
   GLOBAL
   CATEGORY
@@ -132,6 +139,7 @@ model Product {
   orderItems        OrderItem[]
   attributes        ProductAttributeDefinition[]
   descriptionAssets ProductDescriptionAsset[]
+  quoteRequests     QuoteRequest[]
 
   @@index([categoryId, active], map: "idx_products_category_active")
   @@index([brandId, active], map: "idx_products_brand_active")
@@ -185,6 +193,7 @@ model ProductVariant {
   attributeValues        VariantAttributeValue[]
   cartItems              CartItem[]
   orderItems             OrderItem[]
+  quoteRequests          QuoteRequest[]
 
   @@index([active, score(sort: Desc)], map: "idx_variants_active_score")
   @@index([categoryId, score(sort: Desc)], map: "idx_variants_category_score")
@@ -263,25 +272,62 @@ model VariantAttributeValue {
 }
 
 model User {
-  id               String        @id @default(uuid())
-  fullName         String?       @map("full_name")
-  dateOfBirth      DateTime?     @map("date_of_birth")
-  email            String        @unique
-  phoneNumber      String?       @unique @map("phone_number")
-  passwordHash     String        @map("password_hash")
-  role             AppRole       @default(USER)
-  active           Boolean       @default(true)
-  refreshTokenHash String?       @map("refresh_token_hash")
-  lastLoginAt      DateTime?     @map("last_login_at")
-  createdAt        DateTime      @default(now()) @map("created_at")
-  updatedAt        DateTime      @updatedAt @map("updated_at")
+  id               String         @id @default(uuid())
+  fullName         String?        @map("full_name")
+  dateOfBirth      DateTime?      @map("date_of_birth")
+  email            String         @unique
+  phoneNumber      String?        @unique @map("phone_number")
+  passwordHash     String         @map("password_hash")
+  role             AppRole        @default(USER)
+  active           Boolean        @default(true)
+  refreshTokenHash String?        @map("refresh_token_hash")
+  lastLoginAt      DateTime?      @map("last_login_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
   addresses        UserAddress[]
   carts            Cart[]
-  orders           Order[]       @relation("CustomerOrders")
-  verifiedPayments Order[]       @relation("PaymentVerifiedByStaff")
+  orders           Order[]        @relation("CustomerOrders")
+  verifiedPayments Order[]        @relation("PaymentVerifiedByStaff")
+  quoteRequests    QuoteRequest[] @relation("CustomerQuoteRequests")
+  claimedQuotes    QuoteRequest[] @relation("QuoteRequestClaimedByStaff")
 
   @@index([role, active], map: "idx_users_role_active")
   @@map("users")
+}
+
+model QuoteRequest {
+  id               String             @id @default(uuid())
+  requestCode      String             @unique @map("request_code")
+  requestGroupCode String             @map("request_group_code")
+  userId           String?            @map("user_id")
+  productId        String             @map("product_id")
+  variantId        String             @map("variant_id")
+  customerName     String             @map("customer_name")
+  customerEmail    String             @map("customer_email")
+  customerPhone    String             @map("customer_phone")
+  quantity         Int                @default(1)
+  customerNote     String?            @map("customer_note")
+  status           QuoteRequestStatus @default(PENDING)
+  staffNote        String?            @map("staff_note")
+  claimedByStaffId String?            @map("claimed_by_staff_id")
+  claimedAt        DateTime?          @map("claimed_at")
+  quotedAt         DateTime?          @map("quoted_at")
+  cancelledAt      DateTime?          @map("cancelled_at")
+  closedAt         DateTime?          @map("closed_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  user             User?              @relation("CustomerQuoteRequests", fields: [userId], references: [id], onDelete: SetNull)
+  product          Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant          ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  claimedByStaff   User?              @relation("QuoteRequestClaimedByStaff", fields: [claimedByStaffId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt], map: "idx_quote_requests_user_created_at")
+  @@index([customerEmail, status, createdAt], map: "idx_quote_requests_email_status_created")
+  @@index([customerPhone, status, createdAt], map: "idx_quote_requests_phone_status_created")
+  @@index([requestGroupCode, createdAt], map: "idx_quote_requests_group_created")
+  @@index([status, createdAt], map: "idx_quote_requests_status_created")
+  @@index([claimedByStaffId, status], map: "idx_quote_requests_staff_status")
+  @@map("quote_requests")
 }
 
 model UserAddress {
