@@ -503,11 +503,8 @@ export class OrdersService {
   ) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: {
-        id: true,
-        status: true,
-        paymentStatus: true,
-        staffNote: true,
+      include: {
+        items: true,
       },
     });
 
@@ -533,16 +530,20 @@ export class OrdersService {
       throw new BadRequestException('Order payment cannot be confirmed now');
     }
 
-    await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: OrderStatus.CONFIRMED,
-        paymentStatus: PaymentStatus.PAID,
-        paymentVerifiedAt: new Date(),
-        paymentVerifiedByStaffId: staffUserId,
-        paymentRejectReason: null,
-        staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          status: OrderStatus.CONFIRMED,
+          paymentStatus: PaymentStatus.PAID,
+          paymentVerifiedAt: new Date(),
+          paymentVerifiedByStaffId: staffUserId,
+          paymentRejectReason: null,
+          staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
+        },
+      });
+
+      await this.incrementVariantOrderCounts(tx, order.items);
     });
 
     await this.mailService.notifyOrderStatusChanged(order.id);
@@ -1205,6 +1206,22 @@ export class OrdersService {
         where: { id: item.variantId },
         data: {
           stockQuantity: { increment: item.quantity },
+        },
+      });
+    }
+  }
+
+  private async incrementVariantOrderCounts(
+    tx: Prisma.TransactionClient,
+    items: Array<
+      Pick<Prisma.OrderItemGetPayload<object>, 'variantId' | 'quantity'>
+    >,
+  ) {
+    for (const item of items) {
+      await tx.productVariant.update({
+        where: { id: item.variantId },
+        data: {
+          orderCount: { increment: item.quantity },
         },
       });
     }

@@ -499,6 +499,7 @@ export class ProductService {
 
     return {
       ...variant,
+      rating: this.serializeVariantRating(variant),
       effectiveImageUrls:
         variant.imageUrls.length > 0 ? variant.imageUrls : productImageUrls,
       tax: {
@@ -532,6 +533,21 @@ export class ProductService {
     }
 
     return variant.price;
+  }
+
+  private serializeVariantRating(
+    variant: Pick<
+      Prisma.ProductVariantGetPayload<object>,
+      'ratingAverage' | 'ratingCount' | 'ratingTotal'
+    >,
+  ) {
+    return {
+      average: variant.ratingAverage.toString(),
+      count: variant.ratingCount,
+      total: variant.ratingTotal.toString(),
+      baselineAverage: '5.00',
+      baselineCounted: false,
+    };
   }
 
   private async ensureCategoryExists(id: string) {

@@ -258,6 +258,22 @@ export class VariantService {
   }
 
   async findBySlug(slug: string) {
+    const detailInclude = {
+      category: true,
+      brand: true,
+      product: true,
+      attributeValues: {
+        include: {
+          productAttributeDefinition: true,
+        },
+        orderBy: {
+          productAttributeDefinition: {
+            sortOrder: 'asc',
+          },
+        },
+      },
+    } satisfies Prisma.ProductVariantInclude;
+
     const variant = await this.prisma.productVariant.findFirst({
       where: {
         slug,
@@ -267,28 +283,22 @@ export class VariantService {
           status: 'PUBLISHED',
         },
       },
-      include: {
-        category: true,
-        brand: true,
-        product: true,
-        attributeValues: {
-          include: {
-            productAttributeDefinition: true,
-          },
-          orderBy: {
-            productAttributeDefinition: {
-              sortOrder: 'asc',
-            },
-          },
-        },
-      },
+      include: detailInclude,
     });
 
     if (!variant) {
       return null;
     }
 
-    return this.withPublicPricing(variant);
+    const viewedVariant = await this.prisma.productVariant.update({
+      where: { id: variant.id },
+      data: {
+        viewCount: { increment: 1 },
+      },
+      include: detailInclude,
+    });
+
+    return this.withPublicPricing(viewedVariant);
   }
 
   async update(id: string, data: UpdateVariantDto) {
@@ -367,6 +377,50 @@ export class VariantService {
         brand: true,
         product: true,
       },
+    });
+  }
+
+  async recordRating(id: string, ratingValue: number) {
+    if (!Number.isFinite(ratingValue) || ratingValue < 1 || ratingValue > 5) {
+      throw new BadRequestException('Rating must be between 1 and 5');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const variant = await tx.productVariant.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          ratingCount: true,
+          ratingTotal: true,
+        },
+      });
+
+      if (!variant) {
+        throw new NotFoundException('Variant not found');
+      }
+
+      const nextTotal = variant.ratingTotal.plus(
+        new Prisma.Decimal(ratingValue),
+      );
+      const nextCount = variant.ratingCount + 1;
+      const nextAverage = new Prisma.Decimal(5)
+        .plus(nextTotal)
+        .div(nextCount + 1)
+        .toDecimalPlaces(2);
+
+      return tx.productVariant.update({
+        where: { id },
+        data: {
+          ratingTotal: nextTotal,
+          ratingCount: nextCount,
+          ratingAverage: nextAverage,
+        },
+        include: {
+          category: true,
+          brand: true,
+          product: true,
+        },
+      });
     });
   }
 
@@ -900,6 +954,7 @@ export class VariantService {
 
     return {
       ...variant,
+      rating: this.serializeRating(variant),
       effectiveImageUrls:
         variant.imageUrls.length > 0
           ? variant.imageUrls
@@ -914,6 +969,21 @@ export class VariantService {
         taxAmount: taxAmount.toString(),
         totalWithTax: effectivePrice.plus(taxAmount).toString(),
       },
+    };
+  }
+
+  private serializeRating(
+    variant: Pick<
+      Prisma.ProductVariantGetPayload<object>,
+      'ratingAverage' | 'ratingCount' | 'ratingTotal'
+    >,
+  ) {
+    return {
+      average: variant.ratingAverage.toString(),
+      count: variant.ratingCount,
+      total: variant.ratingTotal.toString(),
+      baselineAverage: '5.00',
+      baselineCounted: false,
     };
   }
 

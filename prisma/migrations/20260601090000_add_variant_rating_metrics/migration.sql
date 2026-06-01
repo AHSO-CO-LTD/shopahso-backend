@@ -1,0 +1,4 @@
+ALTER TABLE "product_variants"
+ADD COLUMN "rating_average" DECIMAL(3,2) NOT NULL DEFAULT 5,
+ADD COLUMN "rating_count" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "rating_total" DECIMAL(12,2) NOT NULL DEFAULT 0;
