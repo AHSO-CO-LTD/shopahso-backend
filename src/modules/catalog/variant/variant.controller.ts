@@ -22,6 +22,16 @@ export class VariantController {
     return this.variantService.search(this.parseListQuery(query));
   }
 
+  @Get('featured')
+  findFeatured(@Query() query: Record<string, string | string[] | undefined>) {
+    return this.variantService.findFeatured(this.parseListQuery(query));
+  }
+
+  @Get('newest')
+  findNewest(@Query() query: Record<string, string | string[] | undefined>) {
+    return this.variantService.findNewest(this.parseListQuery(query));
+  }
+
   @Get(':slug')
   async findBySlug(@Param('slug') slug: string) {
     const variant = await this.variantService.findBySlug(slug);

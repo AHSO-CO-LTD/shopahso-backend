@@ -13,6 +13,7 @@ import { JwtUserPayload } from '../auth/auth.types';
 import { TaxService } from '../tax/tax.service';
 import { AddCartItemDto } from './add-cart-item.dto';
 import { UpdateCartItemDto } from './update-cart-item.dto';
+import { PricingService } from '../pricing/pricing.service';
 
 type CartIdentityInput = {
   authorization?: string;
@@ -32,6 +33,7 @@ export class CartService {
     private readonly jwtService: JwtService,
     private readonly authConfigService: AuthConfigService,
     private readonly taxService: TaxService,
+    private readonly pricingService: PricingService,
   ) {}
 
   async findCurrent(identity: CartIdentityInput) {
@@ -42,6 +44,7 @@ export class CartService {
   async addItem(data: AddCartItemDto, identity: CartIdentityInput) {
     const { cart, owner } = await this.getOrCreateCart(identity);
     const variant = await this.findPurchasableVariant(data.variantId);
+    const pricing = await this.pricingService.resolveVariantPricing(variant);
 
     await this.prisma.$transaction(async (tx) => {
       const existingItem = await tx.cartItem.findUnique({
@@ -87,7 +90,7 @@ export class CartService {
           variantNameSnapshot: variant.name,
           priceSnapshot: variant.price,
           salePriceSnapshot: variant.salePrice,
-          effectivePriceSnapshot: this.resolveEffectivePrice(variant),
+          effectivePriceSnapshot: pricing.effectivePrice,
           imageUrlSnapshot: this.resolveImageUrlSnapshot(variant),
         },
       });
@@ -331,7 +334,10 @@ export class CartService {
           productId: item.productId,
           variantId: item.variantId,
         });
-        const currentEffectivePrice = this.resolveEffectivePrice(item.variant);
+        const pricing = await this.pricingService.resolveVariantPricing(
+          item.variant,
+        );
+        const currentEffectivePrice = pricing.effectivePrice;
         const snapshotSubtotal = item.effectivePriceSnapshot.times(
           item.quantity,
         );
@@ -388,6 +394,8 @@ export class CartService {
             salePrice: item.variant.salePrice?.toString() ?? null,
             pricingStatus: item.variant.pricingStatus,
             effectivePrice: currentEffectivePrice.toString(),
+            discountAmount: pricing.discountAmount.toString(),
+            discount: this.pricingService.serializePricing(pricing).discount,
             subtotal: currentSubtotal.toString(),
             tax: {
               source: tax.scope,
@@ -438,26 +446,6 @@ export class CartService {
       createdAt: cart.createdAt,
       updatedAt: cart.updatedAt,
     };
-  }
-
-  private resolveEffectivePrice(
-    variant: Pick<
-      Prisma.ProductVariantGetPayload<object>,
-      'price' | 'salePrice' | 'discountPercent'
-    >,
-  ) {
-    if (variant.salePrice) {
-      return variant.salePrice;
-    }
-
-    if (variant.discountPercent && !variant.discountPercent.isZero()) {
-      return variant.price
-        .times(new Prisma.Decimal(100).minus(variant.discountPercent))
-        .div(100)
-        .toDecimalPlaces(2);
-    }
-
-    return variant.price;
   }
 
   private resolveImageUrlSnapshot(

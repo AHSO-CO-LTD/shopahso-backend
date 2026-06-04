@@ -18,6 +18,7 @@ import { AuthConfigService } from '../auth/auth-config.service';
 import { JwtUserPayload } from '../auth/auth.types';
 import { MailService } from '../mail/mail.service';
 import { PaymentService } from '../payment/payment.service';
+import { PricingService } from '../pricing/pricing.service';
 import { TaxService } from '../tax/tax.service';
 import { CancelOrderDto } from './cancel-order.dto';
 import { CheckoutAddressDto } from './checkout-address.dto';
@@ -74,6 +75,8 @@ type PreviewItem = {
     price: Prisma.Decimal;
     salePrice: Prisma.Decimal | null;
     effectivePrice: Prisma.Decimal;
+    discountAmount: Prisma.Decimal;
+    discount: ReturnType<PricingService['serializePricing']>['discount'];
     subtotal: Prisma.Decimal;
     taxPercent: Prisma.Decimal;
     taxAmount: Prisma.Decimal;
@@ -114,6 +117,7 @@ export class OrdersService {
     private readonly jwtService: JwtService,
     private readonly authConfigService: AuthConfigService,
     private readonly mailService: MailService,
+    private readonly pricingService: PricingService,
   ) {}
 
   async preview(identity: CheckoutIdentityInput, data: PreviewCheckoutDto) {
@@ -503,11 +507,8 @@ export class OrdersService {
   ) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: {
-        id: true,
-        status: true,
-        paymentStatus: true,
-        staffNote: true,
+      include: {
+        items: true,
       },
     });
 
@@ -533,16 +534,20 @@ export class OrdersService {
       throw new BadRequestException('Order payment cannot be confirmed now');
     }
 
-    await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: OrderStatus.CONFIRMED,
-        paymentStatus: PaymentStatus.PAID,
-        paymentVerifiedAt: new Date(),
-        paymentVerifiedByStaffId: staffUserId,
-        paymentRejectReason: null,
-        staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          status: OrderStatus.CONFIRMED,
+          paymentStatus: PaymentStatus.PAID,
+          paymentVerifiedAt: new Date(),
+          paymentVerifiedByStaffId: staffUserId,
+          paymentRejectReason: null,
+          staffNote: this.resolveNextStaffNote(order.staffNote, data.staffNote),
+        },
+      });
+
+      await this.incrementVariantOrderCounts(tx, order.items);
     });
 
     await this.mailService.notifyOrderStatusChanged(order.id);
@@ -793,7 +798,8 @@ export class OrdersService {
   ): Promise<PreviewItem> {
     const issues: PreviewIssue[] = [];
     const variant = item.variant;
-    const effectivePrice = this.resolveEffectivePrice(variant);
+    const pricing = await this.pricingService.resolveVariantPricing(variant);
+    const effectivePrice = pricing.effectivePrice;
     const subtotal = effectivePrice.times(item.quantity).toDecimalPlaces(2);
     const tax = await this.taxService.resolveEffectiveTax({
       categoryId: variant.categoryId,
@@ -888,6 +894,8 @@ export class OrdersService {
         price: variant.price,
         salePrice: variant.salePrice,
         effectivePrice,
+        discountAmount: pricing.discountAmount,
+        discount: this.pricingService.serializePricing(pricing).discount,
         subtotal,
         taxPercent: tax.taxPercent,
         taxAmount,
@@ -1141,26 +1149,6 @@ export class OrdersService {
     return `DH${date}${randomUUID().slice(0, 8).toUpperCase()}`;
   }
 
-  private resolveEffectivePrice(
-    variant: Pick<
-      Prisma.ProductVariantGetPayload<object>,
-      'price' | 'salePrice' | 'discountPercent'
-    >,
-  ) {
-    if (variant.salePrice) {
-      return variant.salePrice;
-    }
-
-    if (variant.discountPercent && !variant.discountPercent.isZero()) {
-      return variant.price
-        .times(new Prisma.Decimal(100).minus(variant.discountPercent))
-        .div(100)
-        .toDecimalPlaces(2);
-    }
-
-    return variant.price;
-  }
-
   private mapFulfillmentToOrderStatus(status: FulfillmentStatus) {
     switch (status) {
       case FulfillmentStatus.PROCESSING:
@@ -1210,11 +1198,29 @@ export class OrdersService {
     }
   }
 
+  private async incrementVariantOrderCounts(
+    tx: Prisma.TransactionClient,
+    items: Array<
+      Pick<Prisma.OrderItemGetPayload<object>, 'variantId' | 'quantity'>
+    >,
+  ) {
+    for (const item of items) {
+      await tx.productVariant.update({
+        where: { id: item.variantId },
+        data: {
+          orderCount: { increment: item.quantity },
+        },
+      });
+    }
+  }
+
   private serializePricing(pricing: PreviewItem['pricing']) {
     return {
       price: pricing.price.toString(),
       salePrice: pricing.salePrice?.toString() ?? null,
       effectivePrice: pricing.effectivePrice.toString(),
+      discountAmount: pricing.discountAmount.toString(),
+      discount: pricing.discount,
       subtotal: pricing.subtotal.toString(),
       taxPercent: pricing.taxPercent.toString(),
       taxAmount: pricing.taxAmount.toString(),

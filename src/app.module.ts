@@ -13,6 +13,8 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { MailModule } from './modules/mail/mail.module';
 import { QuoteRequestsModule } from './modules/quote-requests/quote-requests.module';
+import { PromotionsModule } from './modules/promotions/promotions.module';
+import { BannersModule } from './modules/banners/banners.module';
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { QuoteRequestsModule } from './modules/quote-requests/quote-requests.mod
     OrdersModule,
     MailModule,
     QuoteRequestsModule,
+    PromotionsModule,
+    BannersModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

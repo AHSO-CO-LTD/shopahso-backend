@@ -7,6 +7,7 @@ import { CloudinaryService } from '../../media/cloudinary.service';
 import { TaxService } from '../../tax/tax.service';
 import { sanitizeProductDescriptionHtml } from '../../../common/utils/sanitize-html.util';
 import { ListDescriptionAssetsQuery } from './list-description-assets.query';
+import { PricingService } from '../../pricing/pricing.service';
 
 type UploadedImageFile = {
   buffer: Buffer;
@@ -20,6 +21,7 @@ export class ProductService {
     private readonly prisma: PrismaService,
     private readonly cloudinaryService: CloudinaryService,
     private readonly taxService: TaxService,
+    private readonly pricingService: PricingService,
   ) {}
 
   async findFeatured() {
@@ -486,7 +488,8 @@ export class ProductService {
   private async withPublicVariantPricing<
     TVariant extends Prisma.ProductVariantGetPayload<object>,
   >(variant: TVariant, productImageUrls: string[]) {
-    const effectivePrice = this.resolveEffectivePrice(variant);
+    const pricing = await this.pricingService.resolveVariantPricing(variant);
+    const effectivePrice = pricing.effectivePrice;
     const tax = await this.taxService.resolveEffectiveTax({
       categoryId: variant.categoryId,
       productId: variant.productId,
@@ -499,6 +502,7 @@ export class ProductService {
 
     return {
       ...variant,
+      rating: this.serializeVariantRating(variant),
       effectiveImageUrls:
         variant.imageUrls.length > 0 ? variant.imageUrls : productImageUrls,
       tax: {
@@ -507,6 +511,7 @@ export class ProductService {
         percent: tax.taxPercent.toString(),
       },
       pricing: {
+        ...this.pricingService.serializePricing(pricing),
         effectivePrice: effectivePrice.toString(),
         taxAmount: taxAmount.toString(),
         totalWithTax: effectivePrice.plus(taxAmount).toString(),
@@ -514,24 +519,19 @@ export class ProductService {
     };
   }
 
-  private resolveEffectivePrice(
+  private serializeVariantRating(
     variant: Pick<
       Prisma.ProductVariantGetPayload<object>,
-      'price' | 'salePrice' | 'discountPercent'
+      'ratingAverage' | 'ratingCount' | 'ratingTotal'
     >,
   ) {
-    if (variant.salePrice) {
-      return variant.salePrice;
-    }
-
-    if (variant.discountPercent && !variant.discountPercent.isZero()) {
-      return variant.price
-        .times(new Prisma.Decimal(100).minus(variant.discountPercent))
-        .div(100)
-        .toDecimalPlaces(2);
-    }
-
-    return variant.price;
+    return {
+      average: variant.ratingAverage.toString(),
+      count: variant.ratingCount,
+      total: variant.ratingTotal.toString(),
+      baselineAverage: '5.00',
+      baselineCounted: false,
+    };
   }
 
   private async ensureCategoryExists(id: string) {
