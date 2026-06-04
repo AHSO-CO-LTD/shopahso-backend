@@ -105,6 +105,7 @@ export class BrandService {
         name: data.name,
         slug: data.slug,
         logoUrl: data.logoUrl,
+        bannerUrl: data.bannerUrl,
         active: data.active ?? true,
       },
     });
@@ -119,6 +120,7 @@ export class BrandService {
         ...(data.name !== undefined ? { name: data.name } : {}),
         ...(data.slug !== undefined ? { slug: data.slug } : {}),
         ...(data.logoUrl !== undefined ? { logoUrl: data.logoUrl } : {}),
+        ...(data.bannerUrl !== undefined ? { bannerUrl: data.bannerUrl } : {}),
         ...(data.active !== undefined ? { active: data.active } : {}),
       },
     });
@@ -163,6 +165,43 @@ export class BrandService {
       data: {
         logoUrl: uploaded.secureUrl,
         logoPublicId: uploaded.publicId,
+      },
+    });
+  }
+
+  async uploadBanner(id: string, file: UploadedImageFile) {
+    const brand = await this.prisma.brand.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        slug: true,
+        bannerPublicId: true,
+      },
+    });
+
+    if (!brand) {
+      throw new NotFoundException('Brand not found');
+    }
+
+    const uploaded = await this.cloudinaryService.uploadBuffer({
+      buffer: file.buffer,
+      folder: 'brands',
+      publicId: `${brand.slug}-banner`,
+      overwrite: true,
+    });
+
+    if (
+      brand.bannerPublicId &&
+      brand.bannerPublicId !== uploaded.publicId
+    ) {
+      await this.cloudinaryService.destroy(brand.bannerPublicId);
+    }
+
+    return this.prisma.brand.update({
+      where: { id },
+      data: {
+        bannerUrl: uploaded.secureUrl,
+        bannerPublicId: uploaded.publicId,
       },
     });
   }

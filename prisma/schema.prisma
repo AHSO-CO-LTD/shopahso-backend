@@ -81,6 +81,24 @@ enum PaymentMethod {
   BANK_TRANSFER_QR
 }
 
+enum PromotionStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum PromotionDiscountType {
+  PERCENT
+  FIXED_AMOUNT
+}
+
+enum BannerPlacement {
+  HOMEPAGE
+  PROMOTION
+  FLOATING
+}
+
 model Category {
   id          String                      @id @default(uuid())
   parentId    String?                     @map("parent_id")
@@ -108,6 +126,8 @@ model Brand {
   slug         String           @unique
   logoUrl      String?          @map("logo_url")
   logoPublicId String?          @map("logo_public_id")
+  bannerUrl    String?          @map("banner_url")
+  bannerPublicId String?        @map("banner_public_id")
   active       Boolean          @default(true)
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
@@ -197,6 +217,7 @@ model ProductVariant {
   cartItems              CartItem[]
   orderItems             OrderItem[]
   quoteRequests          QuoteRequest[]
+  promotionItems         PromotionItem[]
 
   @@index([active, score(sort: Desc)], map: "idx_variants_active_score")
   @@index([categoryId, score(sort: Desc)], map: "idx_variants_category_score")
@@ -525,6 +546,58 @@ model PaymentSetting {
 
   @@index([active], map: "idx_payment_settings_active")
   @@map("payment_settings")
+}
+
+model Promotion {
+  id                   String                @id @default(uuid())
+  name                 String
+  slug                 String                @unique
+  description          String?
+  bannerImageUrl       String?               @map("banner_image_url")
+  bannerImagePublicId  String?               @map("banner_image_public_id")
+  bannerLinkUrl        String?               @map("banner_link_url")
+  defaultDiscountType  PromotionDiscountType @default(PERCENT) @map("default_discount_type")
+  defaultDiscountValue Decimal               @map("default_discount_value") @db.Decimal(12, 2)
+  status               PromotionStatus       @default(DRAFT)
+  startsAt             DateTime              @map("starts_at")
+  endsAt               DateTime?             @map("ends_at")
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
+  items                PromotionItem[]
+
+  @@index([status, startsAt, endsAt], map: "idx_promotions_status_schedule")
+  @@map("promotions")
+}
+
+model PromotionItem {
+  id            String                 @id @default(uuid())
+  promotionId   String                 @map("promotion_id")
+  variantId     String                 @map("variant_id")
+  discountType  PromotionDiscountType? @map("discount_type")
+  discountValue Decimal?               @map("discount_value") @db.Decimal(12, 2)
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @updatedAt @map("updated_at")
+  promotion     Promotion              @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  variant       ProductVariant         @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([promotionId, variantId], map: "uq_promotion_items_promotion_variant")
+  @@index([variantId], map: "idx_promotion_items_variant_id")
+  @@map("promotion_items")
+}
+
+model MarketingBanner {
+  id            String          @id @default(uuid())
+  placement     BannerPlacement
+  imageUrl      String?         @map("image_url")
+  imagePublicId String?         @map("image_public_id")
+  linkUrl       String?         @map("link_url")
+  active        Boolean         @default(true)
+  sortOrder     Int             @default(0) @map("sort_order")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  @@index([placement, active, sortOrder], map: "idx_marketing_banners_placement_active_sort")
+  @@map("marketing_banners")
 }
 
 model MailSetting {

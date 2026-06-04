@@ -6,9 +6,10 @@ import { ProductService } from './product.service';
 import { AuthModule } from '../../auth/auth.module';
 import { MediaModule } from '../../media/media.module';
 import { TaxModule } from '../../tax/tax.module';
+import { PricingModule } from '../../pricing/pricing.module';
 
 @Module({
-  imports: [AuthModule, MediaModule, TaxModule],
+  imports: [AuthModule, MediaModule, TaxModule, PricingModule],
   controllers: [ProductController, BackofficeProductController],
   providers: [ProductService, PrismaService],
   exports: [ProductService],

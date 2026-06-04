@@ -18,6 +18,14 @@ export class CreateBrandDto {
   })
   logoUrl?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl({
+    require_tld: false,
+    require_protocol: true,
+  })
+  bannerUrl?: string;
+
   @ApiPropertyOptional({ default: true })
   @IsOptional()
   @IsBoolean()

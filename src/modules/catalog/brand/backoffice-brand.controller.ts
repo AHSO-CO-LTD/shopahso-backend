@@ -81,6 +81,27 @@ export class BackofficeBrandController {
     return this.brandService.uploadLogo(id, file);
   }
 
+  @Post(':id/banner')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadBanner(
+    @Param('id') id: string,
+    @UploadedFile() file?: UploadedImageFile,
+  ) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException('Only image files are allowed');
+    }
+
+    return this.brandService.uploadBanner(id, file);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.brandService.remove(id);

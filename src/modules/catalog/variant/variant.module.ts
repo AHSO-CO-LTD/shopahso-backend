@@ -9,9 +9,17 @@ import { AuthModule } from '../../auth/auth.module';
 import { MediaModule } from '../../media/media.module';
 import { TaxModule } from '../../tax/tax.module';
 import { CountryModule } from '../../../common/countries/country.module';
+import { PricingModule } from '../../pricing/pricing.module';
 
 @Module({
-  imports: [CategoryModule, AuthModule, MediaModule, TaxModule, CountryModule],
+  imports: [
+    CategoryModule,
+    AuthModule,
+    MediaModule,
+    TaxModule,
+    CountryModule,
+    PricingModule,
+  ],
   controllers: [
     VariantController,
     BackofficeVariantController,

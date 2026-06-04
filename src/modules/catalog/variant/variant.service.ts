@@ -20,6 +20,7 @@ import {
 import { CloudinaryService } from '../../media/cloudinary.service';
 import { TaxService } from '../../tax/tax.service';
 import { CountryService } from '../../../common/countries/country.service';
+import { PricingService } from '../../pricing/pricing.service';
 
 type UploadedImageFile = {
   buffer: Buffer;
@@ -91,6 +92,7 @@ export class VariantService {
     private readonly cloudinaryService: CloudinaryService,
     private readonly taxService: TaxService,
     private readonly countryService: CountryService,
+    private readonly pricingService: PricingService,
   ) {}
 
   findAllBackoffice() {
@@ -218,6 +220,51 @@ export class VariantService {
         product: true,
       },
       orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
+      take,
+    });
+
+    return Promise.all(
+      variants.map((variant) => this.withPublicPricing(variant)),
+    );
+  }
+
+  async findFeatured(query: ListVariantsQuery) {
+    const where = await this.buildPublicWhere(query);
+    const take = this.resolveTake(query.limit ?? '10');
+
+    const variants = await this.prisma.productVariant.findMany({
+      where,
+      include: {
+        category: true,
+        brand: true,
+        product: true,
+      },
+      orderBy: [
+        { score: 'desc' },
+        { orderCount: 'desc' },
+        { viewCount: 'desc' },
+        { name: 'asc' },
+      ],
+      take,
+    });
+
+    return Promise.all(
+      variants.map((variant) => this.withPublicPricing(variant)),
+    );
+  }
+
+  async findNewest(query: ListVariantsQuery) {
+    const where = await this.buildPublicWhere(query);
+    const take = this.resolveTake(query.limit ?? '10');
+
+    const variants = await this.prisma.productVariant.findMany({
+      where,
+      include: {
+        category: true,
+        brand: true,
+        product: true,
+      },
+      orderBy: [{ createdAt: 'desc' }],
       take,
     });
 
@@ -941,7 +988,8 @@ export class VariantService {
       include: { product: true };
     }>,
   >(variant: TVariant) {
-    const effectivePrice = this.resolveEffectivePrice(variant);
+    const pricing = await this.pricingService.resolveVariantPricing(variant);
+    const effectivePrice = pricing.effectivePrice;
     const tax = await this.taxService.resolveEffectiveTax({
       categoryId: variant.categoryId,
       productId: variant.productId,
@@ -965,6 +1013,7 @@ export class VariantService {
         percent: tax.taxPercent.toString(),
       },
       pricing: {
+        ...this.pricingService.serializePricing(pricing),
         effectivePrice: effectivePrice.toString(),
         taxAmount: taxAmount.toString(),
         totalWithTax: effectivePrice.plus(taxAmount).toString(),
@@ -985,26 +1034,6 @@ export class VariantService {
       baselineAverage: '5.00',
       baselineCounted: false,
     };
-  }
-
-  private resolveEffectivePrice(
-    variant: Pick<
-      Prisma.ProductVariantGetPayload<object>,
-      'price' | 'salePrice' | 'discountPercent'
-    >,
-  ) {
-    if (variant.salePrice) {
-      return variant.salePrice;
-    }
-
-    if (variant.discountPercent && !variant.discountPercent.isZero()) {
-      return variant.price
-        .times(new Prisma.Decimal(100).minus(variant.discountPercent))
-        .div(100)
-        .toDecimalPlaces(2);
-    }
-
-    return variant.price;
   }
 
   private parseCsvContent(fileBuffer: Buffer) {
