@@ -15,6 +15,7 @@ import { MailModule } from './modules/mail/mail.module';
 import { QuoteRequestsModule } from './modules/quote-requests/quote-requests.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { BannersModule } from './modules/banners/banners.module';
+import { AdminStatisticsModule } from './modules/admin-statistics/admin-statistics.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { BannersModule } from './modules/banners/banners.module';
     QuoteRequestsModule,
     PromotionsModule,
     BannersModule,
+    AdminStatisticsModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
